@@ -114,7 +114,8 @@
       try {
         const result = await detector.detect(video);
         if (mode === 'solo') {
-          registry.sync(result, performance.now());
+          // 帶入顏色取樣：出鏡再回來可依顏色繼承血量
+          registry.sync(result, performance.now(), pose => sampleTorsoColor(video, pose));
         } else {
           // 顏色識別：這個人是哪個玩家
           for (const pose of result) {
@@ -392,6 +393,8 @@
       $('myHpFill').style.width = (myHp / RULES.maxHp * 100) + '%';
       $('killsText').textContent = st.kills[net.myPid] ?? 0;
     });
+    net.on('offline', () => showHitText('⚠️ 連線中斷，自動重連中…'));
+    net.on('rejoined', () => showHitText('✔ 已重新連上'));
     net.on('error', err => {
       alertStatus(`⚠️ ${err.message || err.type || err}`);
       showScreen('startScreen');
@@ -411,8 +414,8 @@
       const name = document.createElement('span');
       name.textContent = p.pid === net.myPid ? `${p.name}（你）` : p.name;
       const ready = document.createElement('span');
-      ready.className = p.color ? 'ready' : 'not-ready';
-      ready.textContent = p.color ? '✔ 已登錄' : '未取樣';
+      if (p.offline) { ready.className = 'not-ready'; ready.textContent = '📴 斷線中'; }
+      else { ready.className = p.color ? 'ready' : 'not-ready'; ready.textContent = p.color ? '✔ 已登錄' : '未取樣'; }
       row.append(chip, name, ready);
       list.appendChild(row);
     }
@@ -535,4 +538,17 @@
 
   $('fireBtn').addEventListener('touchstart', e => { e.preventDefault(); tryFire(); }, { passive: false });
   $('fireBtn').addEventListener('mousedown', e => { if (e.button === 0) tryFire(); });
+
+  // 從背景切回來：相機可能被系統暫停或收回，恢復它；wake lock 也要重新申請
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible') return;
+    const track = video.srcObject?.getVideoTracks?.()[0];
+    if (video.srcObject && (!track || track.readyState === 'ended')) {
+      video.srcObject = null;
+      try { await openCamera(() => {}); $('lobbyCam').srcObject = video.srcObject; } catch (e) { console.error('[cam-resume]', e); }
+    } else {
+      video.play().catch(() => {});
+    }
+    if (running) { try { await navigator.wakeLock?.request('screen'); } catch {} }
+  });
 })();

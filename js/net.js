@@ -48,21 +48,50 @@ class HostNet extends NetBase {
     });
     this.peer.on('connection', conn => {
       conn.on('data', d => this._onData(conn, d));
-      conn.on('close', () => this._removePlayer(conn._pid));
+      conn.on('close', () => this._onConnLost(conn));
+      conn.on('error', () => this._onConnLost(conn));
     });
+  }
+
+  /** 玩家斷線：保留狀態一段時間，等他重連拿回原本的血量/擊殺數 */
+  _onConnLost(conn) {
+    const pid = conn._pid;
+    if (pid == null || this.conns.get(pid) !== conn) return;
+    this.conns.delete(pid);
+    const p = this.players.find(p => p.pid === pid);
+    if (!p) return;
+    p.offline = true;
+    p._removeTimer = setTimeout(() => this._removePlayer(pid), RULES.ghostKeepMs);
+    this._broadcastPlayers();
   }
 
   _onData(conn, d) {
     switch (d?.t) {
       case 'join': {
+        const name = String(d.name || '').slice(0, 12);
+        // 同名玩家斷線重連 → 拿回原本的 pid 與狀態
+        const existing = this.players.find(p => p.name === name && p.offline);
+        if (existing) {
+          clearTimeout(existing._removeTimer);
+          existing.offline = false;
+          conn._pid = existing.pid;
+          this.conns.set(existing.pid, conn);
+          conn.send({ t: 'welcome', pid: existing.pid });
+          if (this.started) conn.send({ t: 'start' });
+          this._broadcastPlayers();
+          this._broadcastState();
+          break;
+        }
         const pid = this.nextPid++;
         conn._pid = pid;
         this.conns.set(pid, conn);
-        this.players.push({ pid, name: String(d.name || `玩家${pid}`).slice(0, 12), color: null });
+        this.players.push({ pid, name: name || `玩家${pid}`, color: null });
         this.state.hp[pid] = RULES.maxHp;
         this.state.kills[pid] = 0;
         conn.send({ t: 'welcome', pid });
+        if (this.started) conn.send({ t: 'start' });
         this._broadcastPlayers();
+        this._broadcastState();
         break;
       }
       case 'color': {
@@ -136,7 +165,7 @@ class HostNet extends NetBase {
   }
 
   _broadcastPlayers() {
-    const pub = this.players.map(({ pid, name, color }) => ({ pid, name, color }));
+    const pub = this.players.map(({ pid, name, color, offline }) => ({ pid, name, color, offline: !!offline }));
     this._bcast({ t: 'players', players: pub });
     this.emit('players', pub);
   }
@@ -159,22 +188,61 @@ class HostNet extends NetBase {
 class ClientNet extends NetBase {
   constructor(roomCode, myName) {
     super();
+    this.roomCode = roomCode.trim();
+    this.myName = myName;
+    this._welcomed = false;
+    this._rejoinAttempts = 0;
     this.peer = new Peer();
     this.peer.on('error', err => {
-      const msg = err.type === 'peer-unavailable' ? '找不到這個房間號碼' : `連線錯誤：${err.type}`;
-      this.emit('error', new Error(msg));
+      if (err.type === 'peer-unavailable') {
+        // 首次加入找不到房間 → 報錯；重連中找不到 → 繼續重試
+        if (!this._welcomed) this.emit('error', new Error('找不到這個房間號碼'));
+        else this._scheduleRejoin();
+      } else if (!this._welcomed) {
+        this.emit('error', new Error(`連線錯誤：${err.type}`));
+      }
     });
-    this.peer.on('open', () => {
-      this.conn = this.peer.connect(ROOM_PREFIX + roomCode.trim(), { reliable: true });
-      this.conn.on('open', () => this.conn.send({ t: 'join', name: myName }));
-      this.conn.on('data', d => this._onData(d));
-      this.conn.on('close', () => this.emit('error', new Error('與房主斷線')));
-    });
+    this.peer.on('disconnected', () => { try { this.peer.reconnect(); } catch {} });
+    this.peer.on('open', () => this._connect());
+  }
+
+  _connect() {
+    this.conn = this.peer.connect(ROOM_PREFIX + this.roomCode, { reliable: true });
+    this.conn.on('open', () => this.conn.send({ t: 'join', name: this.myName }));
+    this.conn.on('data', d => this._onData(d));
+    this.conn.on('close', () => this._onLost());
+    this.conn.on('error', () => this._onLost());
+  }
+
+  /** 斷線（鎖屏/切出 App 常見）→ 自動重連，房主端會還原我的狀態 */
+  _onLost() {
+    if (this._destroyed) return;
+    if (!this._welcomed) { this.emit('error', new Error('與房主斷線')); return; }
+    this.emit('offline');
+    this._scheduleRejoin();
+  }
+
+  _scheduleRejoin() {
+    if (this._destroyed || this._rejoinTimer) return;
+    if (++this._rejoinAttempts > 30) { this.emit('error', new Error('與房主斷線，重連失敗')); return; }
+    this._rejoinTimer = setTimeout(() => {
+      this._rejoinTimer = null;
+      if (this.peer.destroyed) return;
+      if (this.peer.disconnected) { try { this.peer.reconnect(); } catch {} }
+      this._connect();
+    }, 2000);
   }
 
   _onData(d) {
     switch (d?.t) {
-      case 'welcome': this.myPid = d.pid; this.emit('open', null); break;
+      case 'welcome': {
+        const first = !this._welcomed;
+        this._welcomed = true;
+        this._rejoinAttempts = 0;
+        this.myPid = d.pid;
+        this.emit(first ? 'open' : 'rejoined', null);
+        break;
+      }
       case 'players': this.players = d.players; this.emit('players', d.players); break;
       case 'start': this.emit('start'); break;
       case 'state': this.emit('state', this.toLocalState(d)); break;
@@ -184,5 +252,5 @@ class ClientNet extends NetBase {
 
   sendColor(color) { if (this.conn?.open) this.conn.send({ t: 'color', color }); }
   sendHit(victim, part) { if (this.conn?.open) this.conn.send({ t: 'hit', victim, part }); }
-  destroy() { this.peer?.destroy(); }
+  destroy() { this._destroyed = true; clearTimeout(this._rejoinTimer); this.peer?.destroy(); }
 }

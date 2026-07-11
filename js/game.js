@@ -11,20 +11,33 @@ const RULES = {
   fireCooldownMs: 1000,   // 每槍 1 秒冷卻
   respawnMs: 5000,        // 擊倒後 5 秒重生
   targetForgetMs: 4000,   // 追蹤 ID 消失多久後遺忘該靶
+  ghostKeepMs: 60000,     // 遺忘後血量以顏色檔案保留多久（出鏡再回來不回滿血）
 };
 
-/** 場上目標（被鏡頭看到的人）的血量登記表，以追蹤 ID 為鍵 */
+/** 場上目標（被鏡頭看到的人）的血量登記表，以追蹤 ID 為鍵。
+    追蹤 ID 消失時把血量連同衣服顏色存成「幽靈檔案」，
+    新 ID 出現時比對顏色繼承血量 → 出鏡再回來不會回滿血。 */
 class TargetRegistry {
-  constructor() { this.targets = new Map(); }
+  constructor() { this.targets = new Map(); this.ghosts = []; }
 
-  /** 每影格呼叫：確保每個偵測到的 ID 都有登記，並記錄最後出現時間 */
-  sync(poses, now) {
+  /** 每影格呼叫。colorOf(pose) 回傳該姿態的軀幹顏色（可省略） */
+  sync(poses, now, colorOf) {
     for (const pose of poses) {
       let t = this.targets.get(pose.id);
+      const color = colorOf?.(pose) || null;
       if (!t) {
-        t = { id: pose.id, hp: RULES.maxHp, deadUntil: 0, lastSeen: now };
+        // 先找顏色相近的幽靈檔案繼承血量
+        let inherited = null;
+        if (color && typeof colorDistance === 'function') {
+          const idx = this.ghosts.findIndex(g => colorDistance(g.color, color) < 0.5);
+          if (idx >= 0) inherited = this.ghosts.splice(idx, 1)[0];
+        }
+        t = inherited
+          ? { id: pose.id, hp: inherited.hp, deadUntil: inherited.deadUntil, lastSeen: now }
+          : { id: pose.id, hp: RULES.maxHp, deadUntil: 0, lastSeen: now };
         this.targets.set(pose.id, t);
       }
+      if (color) t.color = color;   // 持續更新顏色檔案
       t.lastSeen = now;
       // 重生
       if (t.deadUntil && now >= t.deadUntil) {
@@ -32,10 +45,16 @@ class TargetRegistry {
         t.hp = RULES.maxHp;
       }
     }
-    // 遺忘太久沒出現的 ID（追蹤器換 ID 時避免殘留）
+    // 遺忘太久沒出現的 ID → 轉存幽靈檔案
     for (const [id, t] of this.targets) {
-      if (now - t.lastSeen > RULES.targetForgetMs) this.targets.delete(id);
+      if (now - t.lastSeen > RULES.targetForgetMs) {
+        this.targets.delete(id);
+        if (t.color && t.hp < RULES.maxHp) {
+          this.ghosts.push({ color: t.color, hp: t.hp, deadUntil: t.deadUntil, expire: now + RULES.ghostKeepMs });
+        }
+      }
     }
+    this.ghosts = this.ghosts.filter(g => g.expire > now);
   }
 
   get(id) { return this.targets.get(id); }
