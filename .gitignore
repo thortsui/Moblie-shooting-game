@@ -1,5 +1,8 @@
 _test_person.jpg
+
 # 訓練權重不進 web repo（.pt 給 DGX 訓練用；.onnx 待整合後再視需要納入）
 models/*.pt
 models/*.onnx
-DGX連線與使用手冊.md
+
+# 隱私資料：所有不能上 git 的敏感檔案都放這裡，整個資料夾不同步
+隱私資料/
