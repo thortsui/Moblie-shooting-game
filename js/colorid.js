@@ -70,6 +70,16 @@ function classifyPlayer(hsv, players, excludePid) {
   return best && bestD < COLOR_MATCH_THRESHOLD ? best.pid : null;
 }
 
+/** 色相的環狀插值（0~360 跨界正確） */
+function lerpHue(a, b, t) {
+  let d = b - a;
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  let h = a + d * t;
+  if (h < 0) h += 360;
+  return h % 360;
+}
+
 /** HSV → CSS 色票（大廳顯示用） */
 function hsvToCss(c) {
   return c ? `hsl(${Math.round(c.h)}, ${Math.round(c.s * 100)}%, ${Math.round(Math.max(0.15, c.v * 0.6) * 100)}%)` : '#555';

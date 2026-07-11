@@ -14,67 +14,112 @@ const RULES = {
   ghostKeepMs: 60000,     // 遺忘後血量以顏色檔案保留多久（出鏡再回來不回滿血）
 };
 
-/** 場上目標（被鏡頭看到的人）的血量登記表，以追蹤 ID 為鍵。
-    追蹤 ID 消失時把血量連同衣服顏色存成「幽靈檔案」，
-    新 ID 出現時比對顏色繼承血量 → 出鏡再回來不會回滿血。 */
+/** 場上目標的「人物檔案」登記表。
+    每個被掃描到的人建立一個專屬 ID（P1、P2…整場不變）；
+    偵測器的追蹤 ID 只是暫時代號，透過「位置接續 + 衣服顏色」映射回同一個人物檔案，
+    解決追蹤器頻繁掉鎖造成 ID 一直變、血條被重置打不完的問題。 */
 class TargetRegistry {
-  constructor() { this.targets = new Map(); this.ghosts = []; }
+  constructor() {
+    this.persons = new Map();    // personId -> {id, color, hp, deadUntil, lastSeen, lastPos, lastSize}
+    this.trackMap = new Map();   // 偵測追蹤 ID -> {personId, lastSeen}
+    this.nextPersonId = 1;
+  }
 
-  /** 每影格呼叫。colorOf(pose) 回傳該姿態的軀幹顏色（可省略） */
-  sync(poses, now, colorOf) {
+  /** 每影格呼叫。colorOf(pose) 回傳軀幹顏色；posOf(pose) 回傳 {x, y, size}（可省略） */
+  sync(poses, now, colorOf, posOf) {
+    // 本影格已被綁定的人物（防止兩個偵測框搶同一個檔案）
+    const bound = new Set();
     for (const pose of poses) {
-      let t = this.targets.get(pose.id);
+      const tm = this.trackMap.get(pose.id);
+      if (tm) bound.add(tm.personId);
+    }
+
+    for (const pose of poses) {
+      let tm = this.trackMap.get(pose.id);
       const color = colorOf?.(pose) || null;
-      if (!t) {
-        // 先找顏色相近的幽靈檔案繼承血量
-        let inherited = null;
-        if (color && typeof colorDistance === 'function') {
-          const idx = this.ghosts.findIndex(g => colorDistance(g.color, color) < 0.5);
-          if (idx >= 0) inherited = this.ghosts.splice(idx, 1)[0];
+      const pos = posOf?.(pose) || null;
+
+      if (!tm) {
+        let person = null;
+        // 1) 位置接續：剛消失（<1.5 秒）且位置幾乎重疊的人 → 追蹤器掉鎖，是同一個人
+        if (pos) {
+          let bestD = Infinity;
+          for (const p of this.persons.values()) {
+            if (bound.has(p.id) || !p.lastPos) continue;
+            if (now - p.lastSeen > 1500) continue;
+            const d = Math.hypot(pos.x - p.lastPos.x, pos.y - p.lastPos.y);
+            const limit = Math.max(60, (p.lastSize || 100) * 0.7);
+            if (d < limit && d < bestD) { bestD = d; person = p; }
+          }
         }
-        t = inherited
-          ? { id: pose.id, hp: inherited.hp, deadUntil: inherited.deadUntil, lastSeen: now }
-          : { id: pose.id, hp: RULES.maxHp, deadUntil: 0, lastSeen: now };
-        this.targets.set(pose.id, t);
+        // 2) 顏色比對：出鏡較久後回來的人
+        if (!person && color) {
+          for (const p of this.persons.values()) {
+            if (bound.has(p.id) || !p.color) continue;
+            if (colorDistance(p.color, color) < 0.5) { person = p; break; }
+          }
+        }
+        // 3) 都沒有 → 新人物，發專屬 ID
+        if (!person) {
+          person = { id: this.nextPersonId++, color, hp: RULES.maxHp, deadUntil: 0, lastSeen: now };
+          this.persons.set(person.id, person);
+        }
+        tm = { personId: person.id };
+        this.trackMap.set(pose.id, tm);
+        bound.add(person.id);
       }
-      if (color) t.color = color;   // 持續更新顏色檔案
-      t.lastSeen = now;
+      tm.lastSeen = now;
+
+      const person = this.persons.get(tm.personId);
+      person.lastSeen = now;
+      if (pos) { person.lastPos = { x: pos.x, y: pos.y }; person.lastSize = pos.size; }
+      // 顏色檔案緩慢更新，適應光線漸變
+      if (color) {
+        person.color = person.color
+          ? {
+              h: lerpHue(person.color.h, color.h, 0.15),
+              s: person.color.s + (color.s - person.color.s) * 0.15,
+              v: person.color.v + (color.v - person.color.v) * 0.15,
+            }
+          : color;
+      }
       // 重生
-      if (t.deadUntil && now >= t.deadUntil) {
-        t.deadUntil = 0;
-        t.hp = RULES.maxHp;
+      if (person.deadUntil && now >= person.deadUntil) {
+        person.deadUntil = 0;
+        person.hp = RULES.maxHp;
       }
     }
-    // 遺忘太久沒出現的 ID → 轉存幽靈檔案
-    for (const [id, t] of this.targets) {
-      if (now - t.lastSeen > RULES.targetForgetMs) {
-        this.targets.delete(id);
-        if (t.color && t.hp < RULES.maxHp) {
-          this.ghosts.push({ color: t.color, hp: t.hp, deadUntil: t.deadUntil, expire: now + RULES.ghostKeepMs });
-        }
-      }
+
+    // 清理過期的追蹤映射（人物檔案保留整場，專屬 ID 不回收）
+    for (const [tid, tm] of this.trackMap) {
+      if (now - tm.lastSeen > RULES.targetForgetMs) this.trackMap.delete(tid);
     }
-    this.ghosts = this.ghosts.filter(g => g.expire > now);
   }
 
-  get(id) { return this.targets.get(id); }
-
-  isDead(id, now) {
-    const t = this.targets.get(id);
-    return !!(t && t.deadUntil && now < t.deadUntil);
+  _person(trackId) {
+    const tm = this.trackMap.get(trackId);
+    return tm ? this.persons.get(tm.personId) : null;
   }
 
-  /** 對目標造成傷害。回傳 {hp, killed} */
-  takeDamage(id, part, now) {
-    const t = this.targets.get(id);
-    if (!t || (t.deadUntil && now < t.deadUntil)) return null;
-    t.hp = Math.max(0, t.hp - RULES.damage[part]);
+  /** 以偵測追蹤 ID 取人物檔案（含專屬 id、hp、deadUntil） */
+  get(trackId) { return this._person(trackId); }
+
+  isDead(trackId, now) {
+    const p = this._person(trackId);
+    return !!(p && p.deadUntil && now < p.deadUntil);
+  }
+
+  /** 對目標造成傷害。回傳 {hp, killed, personId} */
+  takeDamage(trackId, part, now) {
+    const p = this._person(trackId);
+    if (!p || (p.deadUntil && now < p.deadUntil)) return null;
+    p.hp = Math.max(0, p.hp - RULES.damage[part]);
     let killed = false;
-    if (t.hp === 0) {
-      t.deadUntil = now + RULES.respawnMs;
+    if (p.hp === 0) {
+      p.deadUntil = now + RULES.respawnMs;
       killed = true;
     }
-    return { hp: t.hp, killed };
+    return { hp: p.hp, killed, personId: p.id };
   }
 }
 

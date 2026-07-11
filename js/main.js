@@ -115,8 +115,21 @@
         const result = await detector.detect(video);
         detErrors = 0;
         if (mode === 'solo') {
-          // 帶入顏色取樣：出鏡再回來可依顏色繼承血量
-          registry.sync(result, performance.now(), pose => sampleTorsoColor(video, pose));
+          // 位置 + 顏色雙重比對，把追蹤 ID 映射回穩定的人物專屬 ID
+          registry.sync(
+            result,
+            performance.now(),
+            pose => sampleTorsoColor(video, pose),
+            pose => {
+              const b = poseBounds(pose);
+              if (!b) return null;
+              return {
+                x: (b.minX + b.maxX) / 2,
+                y: (b.minY + b.maxY) / 2,
+                size: Math.hypot(b.maxX - b.minX, b.maxY - b.minY),
+              };
+            }
+          );
         } else {
           // 顏色識別：這個人是哪個玩家
           for (const pose of result) {
@@ -166,7 +179,7 @@
       const t = registry.get(pose.id);
       if (!t) return null;
       const dead = registry.isDead(pose.id, now);
-      return { label: `P${pose.id}`, hp: t.hp, dead, deadRemainMs: dead ? t.deadUntil - now : 0, registered: true };
+      return { label: `P${t.id}`, hp: t.hp, dead, deadRemainMs: dead ? t.deadUntil - now : 0, registered: true };
     }
     if (pose.pid == null || !netState) return { registered: false };
     const player = net.players.find(p => p.pid === pose.pid);
@@ -336,7 +349,7 @@
     if (mode === 'solo') {
       const result = registry.takeDamage(best.pose.id, best.part, now);
       if (!result) return;
-      hitFeedback(best.part, result.killed, `P${best.pose.id}`);
+      hitFeedback(best.part, result.killed, `P${result.personId}`);
       if (result.killed) { soloKills++; $('killsText').textContent = soloKills; }
     } else {
       net.sendHit(best.pose.pid, best.part);          // 房主權威判定
