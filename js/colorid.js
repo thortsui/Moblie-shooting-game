@@ -46,16 +46,17 @@ function sampleTorsoColor(video, pose) {
   return sampleRegion(video, cx - w / 2, cy - h / 2, w, h);
 }
 
-/** 兩個 HSV 顏色的距離（色相為主、飽和/明度為輔） */
+/** 兩個 HSV 顏色的距離。色相為主；飽和/明度權重壓低 —
+    取樣（近距離大廳）和實戰（遠距離不同光線）的亮度差異很大，不能太依賴 s/v。 */
 function colorDistance(a, b) {
   const dh = Math.min(Math.abs(a.h - b.h), 360 - Math.abs(a.h - b.h)) / 180;
   const ds = Math.abs(a.s - b.s), dv = Math.abs(a.v - b.v);
   // 兩者都接近無彩色（白灰黑）時，色相不可靠，改比明度
   if (a.s < 0.18 && b.s < 0.18) return dv * 1.2 + ds * 0.5;
-  return dh * 2 + ds * 0.7 + dv * 0.4;
+  return dh * 2 + ds * 0.4 + dv * 0.15;
 }
 
-const COLOR_MATCH_THRESHOLD = 0.55;   // 超過此距離視為「不是任何已登錄玩家」（需實測調整）
+const COLOR_MATCH_THRESHOLD = 0.75;   // 超過此距離視為「不是任何已登錄玩家」（放寬以容忍光線變化）
 
 /** 比對顏色屬於哪個玩家，回傳 pid 或 null（excludePid = 自己） */
 function classifyPlayer(hsv, players, excludePid) {

@@ -24,16 +24,20 @@ const MIN_KP_SCORE = 0.3;
 const DET_MAX_DIM = 256;     // 推論輸入長邊（與模型內部解析度一致，餵更大只是浪費）
 const SMOOTH_ALPHA = 0.55;   // 關鍵點指數平滑係數（越小越穩但越拖）
 
-async function createPoseDetector(onStatus) {
-  // WebGPU（iOS 18+ / 新 Android 快很多）→ 失敗退回 WebGL
-  let backend = 'webgpu';
-  try {
-    onStatus('載入 WebGPU 加速…');
-    await tf.setBackend('webgpu');
-    await tf.ready();
-  } catch {
-    onStatus('此裝置不支援 WebGPU，改用 WebGL…');
-    backend = 'webgl';
+async function createPoseDetector(onStatus, forceBackend) {
+  // WebGPU（iOS 18+ / 新 Android 快很多）→ 失敗退回 WebGL；可強制指定
+  let backend = forceBackend || 'webgpu';
+  if (backend === 'webgpu') {
+    try {
+      onStatus('載入 WebGPU 加速…');
+      await tf.setBackend('webgpu');
+      await tf.ready();
+    } catch {
+      backend = 'webgl';
+    }
+  }
+  if (backend === 'webgl') {
+    onStatus('載入 WebGL 後端…');
     await tf.setBackend('webgl');
     await tf.ready();
   }

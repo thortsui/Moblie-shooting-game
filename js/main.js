@@ -108,11 +108,12 @@
   window.addEventListener('resize', resizeOverlay);
 
   /* ── 偵測迴圈 ── */
-  let fpsCount = 0, fpsLast = performance.now();
+  let fpsCount = 0, fpsLast = performance.now(), detErrors = 0;
   async function detectLoop() {
     while (running) {
       try {
         const result = await detector.detect(video);
+        detErrors = 0;
         if (mode === 'solo') {
           // 帶入顏色取樣：出鏡再回來可依顏色繼承血量
           registry.sync(result, performance.now(), pose => sampleTorsoColor(video, pose));
@@ -125,6 +126,15 @@
         poses = result;
       } catch (e) {
         console.error('[detect]', e);
+        // WebGPU 初始化成功但推論一直失敗（部分 iPhone）→ 自動降級 WebGL
+        if (++detErrors === 6 && detector?.backend === 'webgpu') {
+          showHitText('⚠️ WebGPU 異常，切換 WebGL…');
+          try {
+            detector = await createPoseDetector(() => {}, 'webgl');
+            $('fpsBox').innerHTML = 'FPS: <span id="fpsText">--</span> · webgl';
+            detErrors = 0;
+          } catch (e2) { console.error('[fallback]', e2); }
+        }
       }
       fpsCount++;
       const now = performance.now();
@@ -175,10 +185,11 @@
     const head = headCircle(pose);
     const torso = torsoQuad(pose);
     const dead = info.registered && info.dead;
+    const unreg = !info.registered;
 
-    // 命中區域
+    // 命中區域。未登錄用黃色虛線（明顯可見，提示「有偵測到但認不出是誰」）
     ctx.lineWidth = 2 * devicePixelRatio;
-    const dim = !info.registered || dead;
+    if (unreg) ctx.setLineDash([6 * devicePixelRatio, 5 * devicePixelRatio]);
     if (torso) {
       ctx.beginPath();
       torso.forEach((p, i) => {
@@ -186,18 +197,19 @@
         i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y);
       });
       ctx.closePath();
-      ctx.strokeStyle = dim ? 'rgba(150,150,150,.45)' : 'rgba(80,200,255,.7)';
-      ctx.fillStyle = dim ? 'rgba(150,150,150,.08)' : 'rgba(80,200,255,.12)';
+      ctx.strokeStyle = unreg ? 'rgba(255,210,80,.85)' : dead ? 'rgba(150,150,150,.5)' : 'rgba(80,200,255,.7)';
+      ctx.fillStyle = unreg ? 'rgba(255,210,80,.08)' : dead ? 'rgba(150,150,150,.08)' : 'rgba(80,200,255,.12)';
       ctx.fill(); ctx.stroke();
     }
     if (head) {
       const c = toScreen(head.cx, head.cy, t);
       ctx.beginPath();
       ctx.arc(c.x, c.y, head.r * px, 0, Math.PI * 2);
-      ctx.strokeStyle = dim ? 'rgba(150,150,150,.45)' : 'rgba(255,120,120,.8)';
-      ctx.fillStyle = dim ? 'rgba(150,150,150,.08)' : 'rgba(255,120,120,.12)';
+      ctx.strokeStyle = unreg ? 'rgba(255,210,80,.85)' : dead ? 'rgba(150,150,150,.5)' : 'rgba(255,120,120,.8)';
+      ctx.fillStyle = unreg ? 'rgba(255,210,80,.08)' : dead ? 'rgba(150,150,150,.08)' : 'rgba(255,120,120,.12)';
       ctx.fill(); ctx.stroke();
     }
+    ctx.setLineDash([]);
 
     const topMid = toScreen((bounds.minX + bounds.maxX) / 2, bounds.minY, t);
     const barW = Math.max(70 * devicePixelRatio, (bounds.maxX - bounds.minX) * px * 0.6);
@@ -538,6 +550,11 @@
 
   $('fireBtn').addEventListener('touchstart', e => { e.preventDefault(); tryFire(); }, { passive: false });
   $('fireBtn').addEventListener('mousedown', e => { if (e.button === 0) tryFire(); });
+
+  // 一開頁面就在背景預載模型（不等使用者按按鈕），大幅縮短進入遊戲的等待
+  preloadDetector(msg => alertStatus(msg))
+    .then(() => alertStatus('✔ 模型已就緒'))
+    .catch(e => { detectorPromise = null; alertStatus(`模型預載失敗（進遊戲時會重試）：${e.message}`); });
 
   // 從背景切回來：相機可能被系統暫停或收回，恢復它；wake lock 也要重新申請
   document.addEventListener('visibilitychange', async () => {
