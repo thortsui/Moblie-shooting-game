@@ -1,5 +1,14 @@
 # 🔫 Phone Gun Fight — 手機 AR 槍戰
 
+## 🎮 立即遊玩
+
+### 👉 **[https://thortsui.github.io/Moblie-shooting-game/](https://thortsui.github.io/Moblie-shooting-game/)** 👈
+
+> 用手機瀏覽器開啟上面連結，允許相機權限即可遊玩。
+> （若顯示 404，代表 GitHub Pages 尚未啟用：Settings → Pages → Source 選 `main` / root）
+
+---
+
 用手機鏡頭 + 瀏覽器本地姿態偵測玩的 AR 槍戰網頁遊戲。目前為**單機試作版**：鏡頭裡的每個人都是靶，頭上有血條，打倒後 5 秒重生。
 
 ## 玩法（試作版）
