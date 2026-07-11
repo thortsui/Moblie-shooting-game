@@ -21,12 +21,24 @@ const KEYPOINT_NAMES = [
 const MIN_POSE_SCORE = 0.25;
 const MIN_KP_SCORE = 0.3;
 
-async function createPoseDetector(onStatus) {
-  onStatus('載入 TensorFlow.js 後端…');
-  await tf.setBackend('webgl');
-  await tf.ready();
+const DET_MAX_DIM = 256;     // 推論輸入長邊（與模型內部解析度一致，餵更大只是浪費）
+const SMOOTH_ALPHA = 0.55;   // 關鍵點指數平滑係數（越小越穩但越拖）
 
-  onStatus('下載 MoveNet MultiPose 模型…');
+async function createPoseDetector(onStatus) {
+  // WebGPU（iOS 18+ / 新 Android 快很多）→ 失敗退回 WebGL
+  let backend = 'webgpu';
+  try {
+    onStatus('載入 WebGPU 加速…');
+    await tf.setBackend('webgpu');
+    await tf.ready();
+  } catch {
+    onStatus('此裝置不支援 WebGPU，改用 WebGL…');
+    backend = 'webgl';
+    await tf.setBackend('webgl');
+    await tf.ready();
+  }
+
+  onStatus('載入 MoveNet MultiPose 模型…');
   const detector = await poseDetection.createDetector(
     poseDetection.SupportedModels.MoveNet,
     {
@@ -37,18 +49,52 @@ async function createPoseDetector(onStatus) {
   );
   onStatus('模型就緒');
 
+  // 推論用縮小畫布：影片先縮到長邊 256 再餵模型，大幅減少 GPU 上傳成本
+  const detCanvas = document.createElement('canvas');
+  const detCtx = detCanvas.getContext('2d', { willReadFrequently: true });
+
+  // 每個追蹤 ID 的平滑狀態
+  const smooth = new Map();   // id -> { kp: {name:{x,y}}, lastSeen }
+
   return {
+    backend,
     async detect(video) {
-      const poses = await detector.estimatePoses(video, { flipHorizontal: false });
-      return poses
+      const vw = video.videoWidth, vh = video.videoHeight;
+      if (!vw) return [];
+      const scale = DET_MAX_DIM / Math.max(vw, vh);
+      const dw = Math.round(vw * scale), dh = Math.round(vh * scale);
+      if (detCanvas.width !== dw) { detCanvas.width = dw; detCanvas.height = dh; }
+      detCtx.drawImage(video, 0, 0, dw, dh);
+
+      const poses = await detector.estimatePoses(detCanvas, { flipHorizontal: false });
+      const now = performance.now();
+      const out = poses
         .filter(p => (p.score ?? 1) >= MIN_POSE_SCORE)
         .map(p => {
+          const id = p.id ?? 0;
+          let st = smooth.get(id);
+          if (!st) { st = { kp: {} }; smooth.set(id, st); }
+          st.lastSeen = now;
           const kp = {};
           p.keypoints.forEach((k, i) => {
-            kp[k.name || KEYPOINT_NAMES[i]] = { x: k.x, y: k.y, score: k.score ?? 0 };
+            const name = k.name || KEYPOINT_NAMES[i];
+            // 縮小畫布座標 → 影片座標
+            const x = k.x / scale, y = k.y / scale;
+            // 指數平滑抑制抖動
+            const prev = st.kp[name];
+            const sx = prev ? prev.x + SMOOTH_ALPHA * (x - prev.x) : x;
+            const sy = prev ? prev.y + SMOOTH_ALPHA * (y - prev.y) : y;
+            st.kp[name] = { x: sx, y: sy };
+            kp[name] = { x: sx, y: sy, score: k.score ?? 0 };
           });
-          return { id: p.id ?? 0, score: p.score ?? 1, keypoints: kp };
+          return { id, score: p.score ?? 1, keypoints: kp };
         });
+
+      // 清掉消失太久的平滑狀態
+      for (const [id, st] of smooth) {
+        if (now - st.lastSeen > 4000) smooth.delete(id);
+      }
+      return out;
     },
   };
 }

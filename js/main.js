@@ -121,8 +121,37 @@
       const dead = registry.isDead(pose.id, now);
       drawTarget(pose, t, now, dead);
     }
+    drawEffects(now);
     updateFireRing(now);
     requestAnimationFrame(render);
+  }
+
+  /* ── 開火特效:彈道光束 ── */
+  const effects = [];
+  function drawEffects(now) {
+    for (let i = effects.length - 1; i >= 0; i--) {
+      const fx = effects[i];
+      const p = (now - fx.t0) / fx.dur;
+      if (p >= 1) { effects.splice(i, 1); continue; }
+      const cx = overlay.width / 2, cy = overlay.height / 2;
+      const sx = cx, sy = overlay.height - 150 * devicePixelRatio;   // 槍口位置（開火鍵上方）
+      // 彈道往十字標收斂，尾端淡出
+      const alpha = 1 - p;
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.9;
+      const grad = ctx.createLinearGradient(sx, sy, cx, cy);
+      grad.addColorStop(0, 'rgba(255,210,90,1)');
+      grad.addColorStop(1, 'rgba(255,255,255,.2)');
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = (4 - 3 * p) * devicePixelRatio;
+      ctx.shadowColor = 'rgba(255,180,60,.9)';
+      ctx.shadowBlur = 12 * devicePixelRatio;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(cx, cy);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   /** 畫單一目標：命中區域 + 頭上血條（或重生倒數） */
@@ -214,6 +243,10 @@
     sfx.shot();
     navigator.vibrate?.(30);
     $('fireBtn').classList.add('cooldown');
+    // 開火特效：彈道 + 槍口火光 + 畫面震動
+    effects.push({ t0: now, dur: 130 });
+    flashClass($('muzzleFlash'), 'show');
+    flashClass($('gameScreen'), 'shake');
 
     // 十字標（螢幕中心）換算回影片座標做命中判定
     const t = coverTransform();
@@ -284,6 +317,7 @@
     try {
       await openCamera(msg => { status.textContent = msg; });
       detector = await createPoseDetector(msg => { status.textContent = msg; });
+      $('fpsBox').insertAdjacentText('beforeend', ` · ${detector.backend}`);
 
       $('startScreen').classList.add('hidden');
       $('gameScreen').classList.remove('hidden');
