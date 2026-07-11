@@ -36,21 +36,50 @@
   }
 
   /* ── 相機 ── */
-  async function openCamera() {
-    const tryGet = c => navigator.mediaDevices.getUserMedia({ video: c, audio: false });
-    let stream;
-    try {
-      stream = await tryGet({ facingMode: { exact: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } });
-      mirrored = false;
-    } catch {
-      // 桌機沒有後鏡頭 → 退回任意鏡頭（前鏡頭做鏡像）
-      stream = await tryGet({ width: { ideal: 1280 }, height: { ideal: 720 } });
-      mirrored = true;
+  const CAM_ERROR_HINT = {
+    NotAllowedError: '相機權限被拒絕。請到瀏覽器設定允許此網站使用相機後重試',
+    NotFoundError: '找不到相機裝置',
+    NotReadableError: '相機被其他 App 佔用中，請關閉其他使用相機的 App 後重試',
+    SecurityError: '瀏覽器安全設定阻擋了相機',
+  };
+
+  async function openCamera(onStatus) {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('此瀏覽器不支援相機。若你是從 LINE / FB / IG 的訊息點開連結，請改用「以瀏覽器開啟」或複製網址到 Safari / Chrome');
     }
+    // 由嚴到寬逐層嘗試，優先後鏡頭
+    const candidates = [
+      { facingMode: { exact: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+      { width: { ideal: 1280 }, height: { ideal: 720 } },
+      true,
+    ];
+    let stream = null, lastErr = null;
+    for (let i = 0; i < candidates.length; i++) {
+      onStatus?.(`開啟相機…(嘗試 ${i + 1}/${candidates.length})`);
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: candidates[i], audio: false });
+        break;
+      } catch (e) {
+        lastErr = e;
+        // 權限被拒再試也沒用，直接報錯
+        if (e.name === 'NotAllowedError') break;
+      }
+    }
+    if (!stream) {
+      throw new Error(CAM_ERROR_HINT[lastErr?.name] || `${lastErr?.name}: ${lastErr?.message}`);
+    }
+    // 依實際拿到的鏡頭決定是否鏡像（前鏡頭才鏡像）
+    const settings = stream.getVideoTracks()[0].getSettings?.() || {};
+    mirrored = settings.facingMode === 'user';
     video.srcObject = stream;
-    if (mirrored) video.style.transform = 'scaleX(-1)';
-    await new Promise(res => { video.onloadedmetadata = res; });
+    video.style.transform = mirrored ? 'scaleX(-1)' : '';
+    await new Promise((res, rej) => {
+      video.onloadedmetadata = res;
+      setTimeout(() => rej(new Error('相機串流逾時，畫面沒有送出資料')), 8000);
+    });
     await video.play();
+    onStatus?.(`相機就緒 ${video.videoWidth}x${video.videoHeight}${mirrored ? '（前鏡頭）' : ''}`);
   }
 
   function resizeOverlay() {
@@ -253,8 +282,7 @@
     const btn = $('startBtn'), status = $('loadStatus');
     btn.disabled = true;
     try {
-      status.textContent = '開啟相機…';
-      await openCamera();
+      await openCamera(msg => { status.textContent = msg; });
       detector = await createPoseDetector(msg => { status.textContent = msg; });
 
       $('startScreen').classList.add('hidden');
@@ -269,7 +297,7 @@
       requestAnimationFrame(render);
     } catch (e) {
       console.error('[start]', e);
-      status.textContent = `啟動失敗：${e.message}（需要 HTTPS 或 localhost，且允許相機權限）`;
+      status.textContent = `啟動失敗：${e.message}`;
       btn.disabled = false;
     }
   }
