@@ -1,0 +1,137 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%; height: 100%;
+  background: #000; color: #fff;
+  font-family: system-ui, -apple-system, "Noto Sans TC", sans-serif;
+  overflow: hidden;
+  touch-action: none;           /* 防止雙擊縮放、下拉重新整理 */
+  -webkit-user-select: none; user-select: none;
+}
+
+.screen { position: fixed; inset: 0; }
+.hidden { display: none !important; }
+
+/* ── 開始畫面 ── */
+#startScreen {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px;
+  background: radial-gradient(circle at 50% 30%, #1a2733, #000);
+  padding: 24px; text-align: center;
+}
+#startScreen h1 { font-size: 2rem; }
+.subtitle { color: #8fb8d8; }
+.rules { list-style: none; color: #aaa; line-height: 1.9; font-size: .95rem; }
+#startBtn {
+  margin-top: 12px; padding: 14px 48px; font-size: 1.3rem;
+  border: none; border-radius: 999px;
+  background: #e63946; color: #fff; font-weight: 700;
+  box-shadow: 0 0 24px rgba(230,57,70,.5);
+}
+#startBtn:disabled { background: #555; box-shadow: none; }
+.status { color: #789; font-size: .85rem; min-height: 1.2em; }
+
+/* ── 遊戲畫面 ── */
+#video, #overlay {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+}
+#video { object-fit: cover; }
+
+#hud { position: absolute; inset: 0; pointer-events: none; }
+
+/* 上方自己的血條 */
+#myHpWrap {
+  position: absolute; top: calc(env(safe-area-inset-top, 0px) + 12px);
+  left: 50%; transform: translateX(-50%);
+  width: min(70vw, 320px); text-align: center;
+}
+#myHpLabel { font-size: .8rem; font-weight: 700; text-shadow: 0 1px 3px #000; margin-bottom: 4px; }
+#myHpBar {
+  height: 14px; border-radius: 7px;
+  background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.4);
+  overflow: hidden;
+}
+#myHpFill {
+  height: 100%; width: 100%;
+  background: linear-gradient(90deg, #2ecc71, #27ae60);
+  transition: width .25s;
+}
+
+/* 十字標 */
+#crosshair {
+  position: absolute; top: 50%; left: 50%;
+  width: 0; height: 0;
+}
+.ch-line { position: absolute; background: rgba(255,255,255,.9); box-shadow: 0 0 3px #000; }
+.ch-top    { width: 2px; height: 12px; left: -1px; top: -20px; }
+.ch-bottom { width: 2px; height: 12px; left: -1px; top: 8px; }
+.ch-left   { height: 2px; width: 12px; top: -1px; left: -20px; }
+.ch-right  { height: 2px; width: 12px; top: -1px; left: 8px; }
+
+/* 命中標記（X 形，命中瞬間顯示） */
+#hitMarker {
+  position: absolute; top: -14px; left: -14px; width: 28px; height: 28px;
+  opacity: 0; pointer-events: none;
+}
+#hitMarker::before, #hitMarker::after {
+  content: ""; position: absolute; top: 13px; left: 0;
+  width: 28px; height: 3px; background: #ff4d4d; box-shadow: 0 0 4px #000;
+}
+#hitMarker::before { transform: rotate(45deg); }
+#hitMarker::after  { transform: rotate(-45deg); }
+#hitMarker.show { animation: hitPop .3s ease-out; }
+@keyframes hitPop {
+  0% { opacity: 1; transform: scale(1.4); }
+  100% { opacity: 0; transform: scale(.9); }
+}
+
+/* 命中文字（爆頭！/ 擊倒！） */
+#hitText {
+  position: absolute; top: 38%; left: 50%; transform: translateX(-50%);
+  font-size: 1.6rem; font-weight: 900; color: #ffd166;
+  text-shadow: 0 2px 6px #000; opacity: 0; white-space: nowrap;
+}
+#hitText.show { animation: textFloat .8s ease-out; }
+@keyframes textFloat {
+  0% { opacity: 1; transform: translate(-50%, 0) scale(1.2); }
+  100% { opacity: 0; transform: translate(-50%, -40px) scale(1); }
+}
+
+/* 開火鍵 */
+#fireWrap {
+  position: absolute; bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
+  left: 50%; transform: translateX(-50%);
+  pointer-events: auto;
+}
+#fireBtn {
+  position: relative; width: 92px; height: 92px; border-radius: 50%;
+  border: 3px solid rgba(255,255,255,.85);
+  background: radial-gradient(circle at 35% 30%, #ff6b6b, #c0182b);
+  box-shadow: 0 4px 18px rgba(0,0,0,.6);
+  display: flex; align-items: center; justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+}
+#fireBtn:active { transform: scale(.93); }
+#fireBtn.cooldown { filter: grayscale(.8) brightness(.7); }
+.fire-icon { font-size: 2.2rem; pointer-events: none; }
+/* 冷卻進度環（JS 以 conic-gradient 更新） */
+#fireRing {
+  position: absolute; inset: -3px; border-radius: 50%;
+  pointer-events: none;
+}
+
+/* FPS */
+#fpsBox {
+  position: absolute; top: calc(env(safe-area-inset-top, 0px) + 10px); left: 10px;
+  font-size: .75rem; color: #9f9; background: rgba(0,0,0,.45);
+  padding: 3px 8px; border-radius: 6px; font-variant-numeric: tabular-nums;
+}
+
+/* 被擊中紅閃 */
+#damageFlash {
+  position: absolute; inset: 0; pointer-events: none; opacity: 0;
+  background: radial-gradient(circle, transparent 45%, rgba(255,0,0,.55) 100%);
+}
+#damageFlash.show { animation: flash .35s ease-out; }
+@keyframes flash { 0% { opacity: 1; } 100% { opacity: 0; } }
