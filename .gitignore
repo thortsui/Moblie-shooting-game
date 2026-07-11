@@ -2,3 +2,4 @@ _test_person.jpg
 # 訓練權重不進 web repo（.pt 給 DGX 訓練用；.onnx 待整合後再視需要納入）
 models/*.pt
 models/*.onnx
+DGX連線與使用手冊.md
