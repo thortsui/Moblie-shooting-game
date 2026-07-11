@@ -7,43 +7,71 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Phone Gun Fight — AR 槍戰試作版</title>
+<title>Phone Gun Fight — AR 槍戰</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/style.css?v=3">
 </head>
 <body>
 
-<!-- 開始畫面 -->
-<div id="startScreen" class="screen">
+<!-- ── 主選單 ── -->
+<div id="startScreen" class="screen menu-bg">
   <h1>🔫 Phone Gun Fight</h1>
-  <p class="subtitle">AR 槍戰 — 單機試作版</p>
+  <p class="subtitle">手機 AR 槍戰</p>
+
+  <input id="nameInput" type="text" maxlength="8" placeholder="你的名字" autocomplete="off">
+
+  <div class="menu-btns">
+    <button id="soloBtn" class="menu-btn">🎯 單機練習</button>
+    <button id="hostBtn" class="menu-btn primary">🏠 建立房間</button>
+    <div class="join-row">
+      <input id="roomInput" type="tel" maxlength="4" placeholder="房號" autocomplete="off">
+      <button id="joinBtn" class="menu-btn">🚪 加入</button>
+    </div>
+  </div>
+
   <ul class="rules">
-    <li>十字標對準人開火</li>
-    <li>軀幹 -25 HP／爆頭 -50 HP</li>
-    <li>每槍冷卻 1 秒</li>
-    <li>擊倒後 5 秒重生</li>
+    <li>十字標對準人開火：軀幹 -25／爆頭 -50</li>
+    <li>每槍冷卻 1 秒，倒下 5 秒重生</li>
+    <li>多人模式請每人穿不同的鮮豔顏色</li>
   </ul>
-  <button id="startBtn">開始測試</button>
   <p id="loadStatus" class="status"></p>
   <p class="status">首次開啟需下載 AI 模型（之後會快取、秒開）</p>
 </div>
 
-<!-- 遊戲畫面 -->
+<!-- ── 大廳 ── -->
+<div id="lobbyScreen" class="screen menu-bg hidden">
+  <h2 id="lobbyTitle">房間 <span id="roomCodeText">----</span></h2>
+  <p class="subtitle" id="lobbyHint">把房號唸給朋友輸入加入</p>
+
+  <div id="playerList"></div>
+
+  <div id="colorSampleBox">
+    <p class="sample-hint">📷 將鏡頭對準<b>你自己的衣服</b>（放進圓圈），按取樣登錄你的顏色</p>
+    <div id="lobbyCamWrap">
+      <video id="lobbyCam" autoplay muted playsinline></video>
+      <div id="sampleRing"></div>
+    </div>
+    <button id="sampleBtn">取樣我的顏色</button>
+    <p id="sampleStatus" class="status"></p>
+  </div>
+
+  <button id="startGameBtn" class="menu-btn primary hidden">🔥 開始遊戲</button>
+  <p id="lobbyStatus" class="status"></p>
+</div>
+
+<!-- ── 戰鬥 ── -->
 <div id="gameScreen" class="screen hidden">
   <video id="video" autoplay muted playsinline></video>
   <canvas id="overlay"></canvas>
 
-  <!-- HUD -->
   <div id="hud">
-    <!-- 上方：自己的血條 -->
     <div id="myHpWrap">
       <div id="myHpLabel">HP <span id="myHpText">100</span></div>
       <div id="myHpBar"><div id="myHpFill"></div></div>
     </div>
 
-    <!-- 中央十字標 -->
     <div id="crosshair">
       <div class="ch-line ch-top"></div>
       <div class="ch-line ch-bottom"></div>
@@ -52,37 +80,42 @@
       <div id="hitMarker"></div>
     </div>
 
-    <!-- 命中提示文字 -->
     <div id="hitText"></div>
+    <div id="killFeed"></div>
 
-    <!-- 槍口火光 -->
     <div id="muzzleFlash"></div>
 
-    <!-- 下方：開火鍵 -->
     <div id="fireWrap">
       <button id="fireBtn"><span id="fireRing"></span><span class="fire-icon">🔥</span></button>
     </div>
 
-    <!-- 左上：FPS -->
     <div id="fpsBox">FPS: <span id="fpsText">--</span></div>
+    <div id="killsBox">💀 <span id="killsText">0</span></div>
   </div>
 
-  <!-- 被擊中紅閃（試作版保留元素，之後連線版使用） -->
+  <!-- 自己被擊倒：重生倒數遮罩 -->
+  <div id="respawnOverlay" class="hidden">
+    <div id="respawnMsg">你被擊倒了</div>
+    <div id="respawnCount">5</div>
+  </div>
+
   <div id="damageFlash"></div>
 </div>
 
-<!-- TensorFlow.js + MoveNet MultiPose（試作版視覺引擎，之後可換 YOLOv8-pose ONNX） -->
+<!-- 函式庫 -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.22.0/dist/tf-core.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.22.0/dist/tf-converter.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.22.0/dist/tf-backend-webgl.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgpu@4.22.0/dist/tf-backend-webgpu.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
 
-<script src="js/detector.js"></script>
-<script src="js/game.js"></script>
-<script src="js/main.js"></script>
+<script src="js/detector.js?v=3"></script>
+<script src="js/game.js?v=3"></script>
+<script src="js/colorid.js?v=3"></script>
+<script src="js/net.js?v=3"></script>
+<script src="js/main.js?v=3"></script>
 <script>
-  // Service Worker：快取遊戲檔案與 AI 模型，第二次開啟大幅加速
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>
 </body>
