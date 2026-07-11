@@ -120,18 +120,28 @@ function headCircle(pose) {
   const le = getKp(pose, 'left_ear'), re = getKp(pose, 'right_ear');
   const ls = getKp(pose, 'left_shoulder'), rs = getKp(pose, 'right_shoulder');
   let r = null;
-  if (le && re) r = Math.hypot(le.x - re.x, le.y - re.y) * 0.9;
-  else if (ls && rs) r = Math.hypot(ls.x - rs.x, ls.y - rs.y) * 0.35;
-  if (!r || r < 8) r = 24;
+  if (le && re) r = Math.hypot(le.x - re.x, le.y - re.y) * 1.25;
+  else if (ls && rs) r = Math.hypot(ls.x - rs.x, ls.y - rs.y) * 0.45;
+  if (!r || r < 10) r = 28;
   return { cx, cy, r };
 }
 
-/** 軀幹四邊形：左肩→右肩→右髖→左髖。回傳 null 表示軀幹不完整。 */
+/** 軀幹判定區的放大係數（關鍵點只在骨架上，實際身體比骨架寬一圈） */
+const TORSO_EXPAND_X = 1.45;   // 左右：涵蓋手臂內側與身體輪廓
+const TORSO_EXPAND_Y = 1.30;   // 上下：涵蓋肩頸與骨盆
+
+/** 軀幹四邊形：左肩→右肩→右髖→左髖，並以中心點放大。回傳 null 表示軀幹不完整。 */
 function torsoQuad(pose) {
   const ls = getKp(pose, 'left_shoulder'), rs = getKp(pose, 'right_shoulder');
   const lh = getKp(pose, 'left_hip'), rh = getKp(pose, 'right_hip');
   if (!ls || !rs || !lh || !rh) return null;
-  return [ls, rs, rh, lh].map(p => ({ x: p.x, y: p.y }));
+  const pts = [ls, rs, rh, lh];
+  const cx = pts.reduce((s, p) => s + p.x, 0) / 4;
+  const cy = pts.reduce((s, p) => s + p.y, 0) / 4;
+  return pts.map(p => ({
+    x: cx + (p.x - cx) * TORSO_EXPAND_X,
+    y: cy + (p.y - cy) * TORSO_EXPAND_Y,
+  }));
 }
 
 /** 射線法：點是否在多邊形內 */
