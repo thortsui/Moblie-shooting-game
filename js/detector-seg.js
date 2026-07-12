@@ -12,10 +12,11 @@
  * }>
  */
 
-// 偵測一律用 192（快、保效能）；畫面顯示走相機高解析度（清晰）——偵測與顯示分層
-// 高階裝置用 r3_192（品質較好），舊機 WASM 用 r2_192
-const SEG_HIRES = { model: 'models/seg_r3_192.onnx', size: 192 };
-const SEG_LORES = { model: 'models/seg_r2_192.onnx', size: 192 };
+// 自動選最佳組合（依實測數據）：
+//   WebGPU(新機)＝被開銷卡住，降解析度換不到速度 → 用 256 拿最佳品質
+//   WASM(舊機)＝被運算量卡住，降解析度大幅加速 → 用 128 保流暢
+const SEG_HIRES = { model: 'models/seg_r3_256.onnx', size: 256 };
+const SEG_LORES = { model: 'models/seg_r3_128.onnx', size: 128 };
 // CONF 0.35→乾淨偵測不誤判背景；NMS 0.5→合併同人重複框但保留不同人；MASK_TH 低→剪影略大於人（寧可略大不可小於人）
 const SEG_CONF = 0.35, SEG_NMS_IOU = 0.5, SEG_MASK_TH = 0.4;
 
