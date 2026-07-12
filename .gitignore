@@ -11,3 +11,7 @@ models/*.onnx
 訓練資料/
 
 _bench/
+
+# 原始素材照片（用去背後的 assets/gun.png）
+IMG_*.jpeg
+IMG_*.jpg
