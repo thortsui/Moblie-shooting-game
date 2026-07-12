@@ -190,7 +190,7 @@
     const unreg = !info.registered;
 
     // 剪影填色（未登錄=黃、死亡=灰、可擊殺=藍）
-    const fill = unreg ? 'rgba(255,210,80,.22)' : dead ? 'rgba(150,150,150,.18)' : 'rgba(80,200,255,.28)';
+    const fill = unreg ? [255,210,80,70] : dead ? [150,150,150,55] : [80,200,255,90];
     drawMask(pose, t, fill);
 
     const topMid = toScreen((bounds.minX + bounds.maxX) / 2, bounds.minY, t);
@@ -235,23 +235,29 @@
     ctx.shadowBlur = 0;
   }
 
-  /** 畫人物剪影：掃 proto 遮罩格，逐格填到螢幕 */
-  function drawMask(det, t, fill) {
+  /** 畫人物剪影：遮罩畫進離屏 canvas，再平滑縮放貼到螢幕（避免一格格方塊過度覆蓋） */
+  const _maskCv = document.createElement('canvas');
+  const _maskCtx = _maskCv.getContext('2d');
+  function drawMask(det, t, rgba) {
     if (!det.mask) return;
     const tf = det._tf;
-    const cellW = (1 / tf.mxScale) / tf.scale * t.scale;   // proto 格 → 螢幕寬
-    const cellH = (1 / tf.myScale) / tf.scale * t.scale;
-    ctx.fillStyle = fill;
-    for (let my = 0; my < det.mh; my++) {
-      for (let mx = 0; mx < det.mw; mx++) {
-        if (det.mask[my * det.mw + mx] !== 1) continue;
-        // proto 格中心 → 輸入座標 → 影片座標 → 螢幕
-        const ix = (mx + 0.5) / tf.mxScale, iy = (my + 0.5) / tf.myScale;
-        const vx = (ix - tf.padX) / tf.scale, vy = (iy - tf.padY) / tf.scale;
-        const s = toScreen(vx, vy, t);
-        ctx.fillRect(s.x - cellW / 2 - 1, s.y - cellH / 2 - 1, cellW + 2, cellH + 2);
-      }
+    if (_maskCv.width !== det.mw) { _maskCv.width = det.mw; _maskCv.height = det.mh; }
+    const img = _maskCtx.createImageData(det.mw, det.mh);
+    const [r, g, b, a] = rgba;
+    for (let i = 0; i < det.mask.length; i++) {
+      if (det.mask[i]) { img.data[i*4] = r; img.data[i*4+1] = g; img.data[i*4+2] = b; img.data[i*4+3] = a; }
     }
+    _maskCtx.putImageData(img, 0, 0);
+    // proto→螢幕 為線性映射；計算整個遮罩網格貼到螢幕的位置與尺寸
+    const cellW = t.scale / (tf.mxScale * tf.scale);
+    const cellH = t.scale / (tf.myScale * tf.scale);
+    const originX = -tf.padX / tf.scale * t.scale + t.offX;
+    const originY = -tf.padY / tf.scale * t.scale + t.offY;
+    ctx.save();
+    if (mirrored) { ctx.translate(overlay.width, 0); ctx.scale(-1, 1); }
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(_maskCv, 0, 0, det.mw, det.mh, originX, originY, cellW * det.mw, cellH * det.mh);
+    ctx.restore();
   }
 
   function roundRect(x, y, w, h, r) {
@@ -309,7 +315,7 @@
     if (isMyDead(now)) return;
     fireCtl.fire(now);
     sfx.shot();
-    navigator.vibrate?.(15);
+    navigator.vibrate?.(20);   // 每發輕微震動（iOS Safari 不支援，Android 有效）
     effects.push({ t0: now, dur: 90 });
     flashClass($('muzzleFlash'), 'show');
     flashClass($('gunOverlay'), 'recoil');

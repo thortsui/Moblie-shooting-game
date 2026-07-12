@@ -14,7 +14,7 @@
 
 const SEG_SIZE = 192;
 const SEG_MODEL = 'models/seg_r2_192.onnx';
-const SEG_CONF = 0.35, SEG_NMS_IOU = 0.5, SEG_MASK_TH = 0.5;
+const SEG_CONF = 0.35, SEG_NMS_IOU = 0.5, SEG_MASK_TH = 0.55;
 
 function _sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
 
