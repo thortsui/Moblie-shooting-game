@@ -95,7 +95,7 @@
   }
 
   function preloadDetector(onStatus) {
-    if (!detectorPromise) detectorPromise = createPoseDetector(onStatus || (() => {}));
+    if (!detectorPromise) detectorPromise = createSegDetector(onStatus || (() => {}));
     return detectorPromise;
   }
 
@@ -119,9 +119,9 @@
           registry.sync(
             result,
             performance.now(),
-            pose => sampleTorsoColor(video, pose),
-            pose => {
-              const b = poseBounds(pose);
+            det => segColorSample(video, det),
+            det => {
+              const b = segBounds(det);
               if (!b) return null;
               return {
                 x: (b.minX + b.maxX) / 2,
@@ -132,22 +132,14 @@
           );
         } else {
           // 顏色識別：這個人是哪個玩家
-          for (const pose of result) {
-            pose.pid = classifyPlayer(sampleTorsoColor(video, pose), net.players, net.myPid);
+          for (const det of result) {
+            det.pid = classifyPlayer(segColorSample(video, det), net.players, net.myPid);
           }
         }
         poses = result;
       } catch (e) {
         console.error('[detect]', e);
-        // WebGPU 初始化成功但推論一直失敗（部分 iPhone）→ 自動降級 WebGL
-        if (++detErrors === 6 && detector?.backend === 'webgpu') {
-          showHitText('⚠️ WebGPU 異常，切換 WebGL…');
-          try {
-            detector = await createPoseDetector(() => {}, 'webgl');
-            $('fpsBox').innerHTML = 'FPS: <span id="fpsText">--</span> · webgl';
-            detErrors = 0;
-          } catch (e2) { console.error('[fallback]', e2); }
-        }
+        detErrors++;
       }
       fpsCount++;
       const now = performance.now();
@@ -191,41 +183,18 @@
 
   function drawTarget(pose, t, now) {
     const info = targetInfo(pose, now);
-    const bounds = poseBounds(pose);
+    const bounds = segBounds(pose);
     if (!info || !bounds) return;
 
-    const px = t.scale;
-    const head = headCircle(pose);
-    const torso = torsoQuad(pose);
     const dead = info.registered && info.dead;
     const unreg = !info.registered;
 
-    // 命中區域。未登錄用黃色虛線（明顯可見，提示「有偵測到但認不出是誰」）
-    ctx.lineWidth = 2 * devicePixelRatio;
-    if (unreg) ctx.setLineDash([6 * devicePixelRatio, 5 * devicePixelRatio]);
-    if (torso) {
-      ctx.beginPath();
-      torso.forEach((p, i) => {
-        const s = toScreen(p.x, p.y, t);
-        i ? ctx.lineTo(s.x, s.y) : ctx.moveTo(s.x, s.y);
-      });
-      ctx.closePath();
-      ctx.strokeStyle = unreg ? 'rgba(255,210,80,.85)' : dead ? 'rgba(150,150,150,.5)' : 'rgba(80,200,255,.7)';
-      ctx.fillStyle = unreg ? 'rgba(255,210,80,.08)' : dead ? 'rgba(150,150,150,.08)' : 'rgba(80,200,255,.12)';
-      ctx.fill(); ctx.stroke();
-    }
-    if (head) {
-      const c = toScreen(head.cx, head.cy, t);
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, head.r * px, 0, Math.PI * 2);
-      ctx.strokeStyle = unreg ? 'rgba(255,210,80,.85)' : dead ? 'rgba(150,150,150,.5)' : 'rgba(255,120,120,.8)';
-      ctx.fillStyle = unreg ? 'rgba(255,210,80,.08)' : dead ? 'rgba(150,150,150,.08)' : 'rgba(255,120,120,.12)';
-      ctx.fill(); ctx.stroke();
-    }
-    ctx.setLineDash([]);
+    // 剪影填色（未登錄=黃、死亡=灰、可擊殺=藍）
+    const fill = unreg ? 'rgba(255,210,80,.22)' : dead ? 'rgba(150,150,150,.18)' : 'rgba(80,200,255,.28)';
+    drawMask(pose, t, fill);
 
     const topMid = toScreen((bounds.minX + bounds.maxX) / 2, bounds.minY, t);
-    const barW = Math.max(70 * devicePixelRatio, (bounds.maxX - bounds.minX) * px * 0.6);
+    const barW = Math.max(70 * devicePixelRatio, (bounds.maxX - bounds.minX) * t.scale * 0.6);
     const barH = 10 * devicePixelRatio;
     const bx = topMid.x - barW / 2;
     const by = topMid.y - barH - 14 * devicePixelRatio;
@@ -264,6 +233,25 @@
     ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
     ctx.fillText(`${info.label} · ${info.hp}`, topMid.x, by - 4 * devicePixelRatio);
     ctx.shadowBlur = 0;
+  }
+
+  /** 畫人物剪影：掃 proto 遮罩格，逐格填到螢幕 */
+  function drawMask(det, t, fill) {
+    if (!det.mask) return;
+    const tf = det._tf;
+    const cellW = (1 / tf.mxScale) / tf.scale * t.scale;   // proto 格 → 螢幕寬
+    const cellH = (1 / tf.myScale) / tf.scale * t.scale;
+    ctx.fillStyle = fill;
+    for (let my = 0; my < det.mh; my++) {
+      for (let mx = 0; mx < det.mw; mx++) {
+        if (det.mask[my * det.mw + mx] !== 1) continue;
+        // proto 格中心 → 輸入座標 → 影片座標 → 螢幕
+        const ix = (mx + 0.5) / tf.mxScale, iy = (my + 0.5) / tf.myScale;
+        const vx = (ix - tf.padX) / tf.scale, vy = (iy - tf.padY) / tf.scale;
+        const s = toScreen(vx, vy, t);
+        ctx.fillRect(s.x - cellW / 2 - 1, s.y - cellH / 2 - 1, cellW + 2, cellH + 2);
+      }
+    }
   }
 
   function roundRect(x, y, w, h, r) {
@@ -330,41 +318,36 @@
     const t = coverTransform();
     const aim = screenCenterToVideo(t);
 
-    // 找被打中的目標（頭部優先，其次距離近者）
+    // 找被打中的目標：十字標中心點落在剪影內即命中（最靠近中心者優先）
     let best = null;
-    for (const pose of poses) {
-      const info = targetInfo(pose, now);
+    for (const det of poses) {
+      const info = targetInfo(det, now);
       if (!info?.registered || info.dead) continue;
-      const part = hitTest(pose, aim.x, aim.y);
-      if (!part) continue;
-      const head = headCircle(pose);
-      const d = head ? Math.hypot(aim.x - head.cx, aim.y - head.cy) : Infinity;
-      if (!best || (part === 'head' && best.part !== 'head') ||
-          (part === best.part && d < best.d)) {
-        best = { pose, part, d };
-      }
+      if (!segHitTest(det, aim.x, aim.y)) continue;
+      const b = det.bbox;
+      const d = Math.hypot(aim.x - (b.minX + b.maxX) / 2, aim.y - (b.minY + b.maxY) / 2);
+      if (!best || d < best.d) best = { det, d };
     }
     if (!best) return;
 
     if (mode === 'solo') {
-      const result = registry.takeDamage(best.pose.id, best.part, now);
+      const result = registry.takeDamage(best.det.id, 'hit', now);
       if (!result) return;
-      hitFeedback(best.part, result.killed, `P${result.personId}`);
+      hitFeedback(result.killed, `P${result.personId}`);
       if (result.killed) { soloKills++; $('killsText').textContent = soloKills; }
     } else {
-      net.sendHit(best.pose.pid, best.part);          // 房主權威判定
-      const name = net.players.find(p => p.pid === best.pose.pid)?.name ?? '';
-      hitFeedback(best.part, false, name);            // 樂觀回饋（擊倒訊息等房主廣播）
+      net.sendHit(best.det.pid, 'hit');               // 房主權威判定
+      const name = net.players.find(p => p.pid === best.det.pid)?.name ?? '';
+      hitFeedback(false, name);                       // 樂觀回饋（擊倒訊息等房主廣播）
     }
   }
 
-  function hitFeedback(part, killed, name) {
-    sfx.hit(part === 'head');
+  function hitFeedback(killed, name) {
+    sfx.hit(false);
     navigator.vibrate?.(60);
     flashClass($('hitMarker'), 'show');
     if (killed) { sfx.kill(); showHitText(`💀 擊倒 ${name}！`); }
-    else if (part === 'head') showHitText('🎯 爆頭 -50！');
-    else showHitText('-25');
+    else showHitText(`-${RULES.damage.hit}`);
   }
 
   function flashClass(el, cls) {

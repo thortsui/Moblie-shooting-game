@@ -7,7 +7,7 @@
 
 const RULES = {
   maxHp: 100,
-  damage: { head: 50, torso: 25 },
+  damage: { hit: 34, head: 50, torso: 25 },   // hit=剪影命中（方向C，3槍擊倒）；head/torso 保留備用
   fireCooldownMs: 1000,   // 每槍 1 秒冷卻
   respawnMs: 5000,        // 擊倒後 5 秒重生
   targetForgetMs: 4000,   // 追蹤 ID 消失多久後遺忘該靶
