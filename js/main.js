@@ -120,7 +120,7 @@
   window.addEventListener('resize', resizeOverlay);
 
   /* ── 偵測迴圈（方法A：節流到最多 ~12fps，保底 ≥10、把主線程讓給畫面）── */
-  const DET_MIN_INTERVAL = 83;   // 目標偵測間隔(ms)：1000/83≈12fps 上限
+  const DET_MIN_INTERVAL = new URLSearchParams(location.search).has('max') ? 0 : 83;   // ?max=1 拿掉節流量最高fps
   let fpsCount = 0, fpsLast = performance.now(), detErrors = 0;
   async function detectLoop() {
     while (running) {

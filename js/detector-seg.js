@@ -67,6 +67,7 @@ async function createSegDetector(onStatus) {
     async detect(video) {
       const vw = video.videoWidth, vh = video.videoHeight;
       if (!vw) return [];
+      const _t0 = performance.now();
       // letterbox 到 192
       const scale = Math.min(SEG_SIZE / vw, SEG_SIZE / vh);
       const nw = vw * scale, nh = vh * scale, padX = (SEG_SIZE - nw) / 2, padY = (SEG_SIZE - nh) / 2;
@@ -78,7 +79,9 @@ async function createSegDetector(onStatus) {
       for (let i = 0; i < area; i++) {
         t[i] = d[i * 4] / 255; t[area + i] = d[i * 4 + 1] / 255; t[2 * area + i] = d[i * 4 + 2] / 255;
       }
+      const _t1 = performance.now();
       const res = await sess.run({ [inName]: new ort.Tensor('float32', t, [1, 3, SEG_SIZE, SEG_SIZE]) });
+      const _t2 = performance.now();
       const o0 = res[outN[0]], o1 = res[outN[1]];
       const [, ch, N] = o0.dims;               // ch=37
       const [, , mh, mw] = o1.dims;            // 32,48,48
@@ -148,6 +151,8 @@ async function createSegDetector(onStatus) {
         };
       });
       assignIds(out, performance.now());
+      const _t3 = performance.now();
+      window.__segProf = { pre: +(_t1-_t0).toFixed(1), infer: +(_t2-_t1).toFixed(1), post: +(_t3-_t2).toFixed(1), total: +(_t3-_t0).toFixed(1) };
       return out;
     },
   };
@@ -180,7 +185,7 @@ function segWorkerSupported() {
 
 async function createSegDetectorWorker(onStatus) {
   onStatus('啟動背景執行緒…');
-  const worker = new Worker('js/seg-worker.js?v=26');
+  const worker = new Worker('js/seg-worker.js?v=prof1');
   const abs = m => new URL(m, location.href).href;
   const assignIds = _makeTracker();
 
@@ -201,6 +206,7 @@ async function createSegDetectorWorker(onStatus) {
   const pending = new Map();
   worker.onmessage = e => {
     if (e.data.type === 'result') {
+      if (e.data.prof) window.__segProf = e.data.prof;
       const p = pending.get(e.data.reqId);
       if (p) { pending.delete(e.data.reqId); p(e.data.dets); }
     }

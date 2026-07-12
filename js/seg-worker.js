@@ -30,9 +30,9 @@ onmessage = async (e) => {
   }
   if (msg.type === 'frame') {
     try {
-      const { dets, transfers } = await runDetect(msg.bitmap, msg.vw, msg.vh);
+      const { dets, transfers, prof } = await runDetect(msg.bitmap, msg.vw, msg.vh);
       msg.bitmap.close();
-      postMessage({ type: 'result', reqId: msg.reqId, dets }, transfers);
+      postMessage({ type: 'result', reqId: msg.reqId, dets, prof }, transfers);
     } catch (err) {
       msg.bitmap.close?.();
       postMessage({ type: 'result', reqId: msg.reqId, dets: [], error: String(err) });
@@ -41,6 +41,7 @@ onmessage = async (e) => {
 };
 
 async function runDetect(bitmap, vw, vh) {
+  const t0 = performance.now();
   const scale = Math.min(SEG_SIZE / vw, SEG_SIZE / vh);
   const nw = vw * scale, nh = vh * scale, padX = (SEG_SIZE - nw) / 2, padY = (SEG_SIZE - nh) / 2;
   cctx.fillStyle = '#000'; cctx.fillRect(0, 0, SEG_SIZE, SEG_SIZE);
@@ -49,8 +50,10 @@ async function runDetect(bitmap, vw, vh) {
   const area = SEG_SIZE * SEG_SIZE;
   const t = new Float32Array(3 * area);
   for (let i = 0; i < area; i++) { t[i] = d[i*4]/255; t[area+i] = d[i*4+1]/255; t[2*area+i] = d[i*4+2]/255; }
+  const t1 = performance.now();
 
   const res = await sess.run({ [inName]: new ort.Tensor('float32', t, [1, 3, SEG_SIZE, SEG_SIZE]) });
+  const t2 = performance.now();
   const on = sess.outputNames;
   const o0 = res[on[0]], o1 = res[on[1]];
   const [, ch, N] = o0.dims; const [, , mh, mw] = o1.dims;
@@ -107,5 +110,7 @@ async function runDetect(bitmap, vw, vh) {
     });
     transfers.push(mask.buffer);
   }
-  return { dets, transfers };
+  const t3 = performance.now();
+  const prof = { pre: +(t1-t0).toFixed(1), infer: +(t2-t1).toFixed(1), post: +(t3-t2).toFixed(1), total: +(t3-t0).toFixed(1) };
+  return { dets, transfers, prof };
 }
