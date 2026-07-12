@@ -175,15 +175,27 @@
       const t = registry.get(pose.id);
       if (!t) return null;
       const dead = registry.isDead(pose.id, now);
-      return { label: `P${t.id}`, hp: t.hp, dead, deadRemainMs: dead ? t.deadUntil - now : 0, registered: true };
+      return { label: `P${t.id}`, pid: t.id, hp: t.hp, dead, deadRemainMs: dead ? t.deadUntil - now : 0, registered: true };
     }
     if (pose.pid == null || !netState) return { registered: false };
     const player = net.players.find(p => p.pid === pose.pid);
     if (!player) return { registered: false };
     const deadUntil = netState.deadUntil[pose.pid] || 0;
     const dead = deadUntil > now;
-    return { label: player.name, hp: netState.hp[pose.pid] ?? 0, dead, deadRemainMs: dead ? deadUntil - now : 0, registered: true };
+    return { label: player.name, pid: pose.pid, hp: netState.hp[pose.pid] ?? 0, dead, deadRemainMs: dead ? deadUntil - now : 0, registered: true };
   }
+
+  // 每個玩家一種顏色（依人物 ID 取用），讓不同人一眼分得出
+  const PERSON_COLORS = [
+    [80,200,255,95],   // 藍
+    [255,95,95,95],    // 紅
+    [120,235,120,95],  // 綠
+    [255,175,60,95],   // 橙
+    [205,120,255,95],  // 紫
+    [95,235,225,95],   // 青
+    [255,120,200,95],  // 粉
+    [235,230,90,95],   // 黃綠
+  ];
 
   function drawTarget(pose, t, now) {
     const info = targetInfo(pose, now);
@@ -193,8 +205,8 @@
     const dead = info.registered && info.dead;
     const unreg = !info.registered;
 
-    // 剪影填色（未登錄=黃、死亡=灰、可擊殺=藍）
-    const fill = unreg ? [255,210,80,70] : dead ? [150,150,150,55] : [80,200,255,90];
+    // 剪影填色：未登錄=黃、死亡=灰、可擊殺=依人物 ID 給不同顏色
+    const fill = unreg ? [255,210,80,70] : dead ? [150,150,150,55] : PERSON_COLORS[info.pid % PERSON_COLORS.length];
     drawMask(pose, t, fill);
 
     const topMid = toScreen((bounds.minX + bounds.maxX) / 2, bounds.minY, t);

@@ -12,10 +12,11 @@
  * }>
  */
 
-// 依裝置選模型：WebGPU→384 高精準；WASM(舊機)→192 保流暢
-const SEG_HIRES = { model: 'models/seg_r3_384.onnx', size: 384 };
+// 依裝置選模型：WebGPU→256（精準/fps 平衡）；WASM(舊機)→192 保流暢
+const SEG_HIRES = { model: 'models/seg_r3_256.onnx', size: 256 };
 const SEG_LORES = { model: 'models/seg_r2_192.onnx', size: 192 };
-const SEG_CONF = 0.35, SEG_NMS_IOU = 0.5, SEG_MASK_TH = 0.55;
+// CONF 0.35→乾淨偵測不誤判背景；NMS 0.5→合併同人重複框但保留不同人；MASK_TH 低→剪影略大於人（寧可略大不可小於人）
+const SEG_CONF = 0.35, SEG_NMS_IOU = 0.5, SEG_MASK_TH = 0.4;
 
 function _sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
 
@@ -112,14 +113,26 @@ async function createSegDetector(onStatus) {
 
       const out = keep.map(dd => {
         // 二值遮罩（proto 解析度），限制在 bbox 內
-        const mask = new Uint8Array(mh * mw);
+        const raw = new Uint8Array(mh * mw);
         const bx1 = dd.ix1 * mxScale, bx2 = dd.ix2 * mxScale, by1 = dd.iy1 * myScale, by2 = dd.iy2 * myScale;
         for (let my = 0; my < mh; my++) {
           if (my < by1 - 1 || my > by2 + 1) continue;
           for (let mx = 0; mx < mw; mx++) {
             if (mx < bx1 - 1 || mx > bx2 + 1) continue;
             let v = 0; for (let k = 0; k < 32; k++) v += dd.coeffs[k] * P[(k * mh + my) * mw + mx];
-            if (_sigmoid(v) >= SEG_MASK_TH) mask[my * mw + mx] = 1;
+            if (_sigmoid(v) >= SEG_MASK_TH) raw[my * mw + mx] = 1;
+          }
+        }
+        // 膨脹 1 格：剪影略大於人、保證不小於人（寧可略大不可小）
+        const mask = new Uint8Array(mh * mw);
+        for (let my = 0; my < mh; my++) {
+          for (let mx = 0; mx < mw; mx++) {
+            if (!raw[my * mw + mx]) continue;
+            mask[my * mw + mx] = 1;
+            if (mx > 0) mask[my * mw + mx - 1] = 1;
+            if (mx < mw - 1) mask[my * mw + mx + 1] = 1;
+            if (my > 0) mask[(my - 1) * mw + mx] = 1;
+            if (my < mh - 1) mask[(my + 1) * mw + mx] = 1;
           }
         }
         return {

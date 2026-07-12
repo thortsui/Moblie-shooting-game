@@ -218,7 +218,7 @@ input:focus { border-color: #e63946; }
 #gunOverlay {
   position: absolute; left: calc(51% + 20px); bottom: 0;   /* 再右移半個十字標橫線(20px) */
   transform: translateX(-50%);
-  height: 46vh;                                /* 降低高度：槍口落在十字標下方 */
+  height: 40vh;                                /* 槍枝再低一點 */
   pointer-events: none;
   filter: drop-shadow(0 -3px 12px rgba(0,0,0,.55));
   z-index: 2;
@@ -233,7 +233,7 @@ input:focus { border-color: #e63946; }
 
 /* 槍口火光（開火鍵上方） */
 #muzzleFlash {
-  position: absolute; left: calc(51% + 20px); bottom: 46vh;
+  position: absolute; left: calc(51% + 20px); bottom: 40vh;
   width: 80px; height: 80px; transform: translate(-50%, 50%);
   z-index: 3;
   border-radius: 50%; opacity: 0; pointer-events: none;
