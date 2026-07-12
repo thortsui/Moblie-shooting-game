@@ -15,8 +15,8 @@
 // 自動選最佳組合（依實測數據）：
 //   WebGPU(新機)＝被開銷卡住，降解析度換不到速度 → 用 256 拿最佳品質
 //   WASM(舊機)＝被運算量卡住，降解析度大幅加速 → 用 128 保流暢
-const SEG_HIRES = { model: 'models/seg_r3_256.onnx', size: 256 };
-const SEG_LORES = { model: 'models/seg_r3_128.onnx', size: 128 };
+const SEG_HIRES = { model: 'models/seg_r4_256.onnx', size: 256 };
+const SEG_LORES = { model: 'models/seg_r4_128.onnx', size: 128 };
 // CONF 0.35→乾淨偵測不誤判背景；NMS 0.5→合併同人重複框但保留不同人；MASK_TH 低→剪影略大於人（寧可略大不可小於人）
 const SEG_CONF = 0.35, SEG_NMS_IOU = 0.5, SEG_MASK_TH = 0.4;
 
@@ -185,7 +185,7 @@ function segWorkerSupported() {
 
 async function createSegDetectorWorker(onStatus) {
   onStatus('啟動背景執行緒…');
-  const worker = new Worker('js/seg-worker.js?v=prof1');
+  const worker = new Worker('js/seg-worker.js?v=cexp1');
   const abs = m => new URL(m, location.href).href;
   const assignIds = _makeTracker();
 
