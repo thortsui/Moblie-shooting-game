@@ -59,12 +59,14 @@
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error('此瀏覽器不支援相機。若你是從 LINE / FB / IG 的訊息點開連結，請改用「以瀏覽器開啟」或複製網址到 Safari / Chrome');
     }
-    // 強化畫質：優先 1080p 高幀率（偵測仍縮到 384，不影響速度）；失敗逐層降級
+    // 強化畫質：優先 2K 高解析度（清晰、利於顏色/特徵辨識），偵測仍縮到 192 不影響速度；失敗逐層降級
+    const UHD = { width: { ideal: 2560 }, height: { ideal: 1440 }, frameRate: { ideal: 60 } };
     const HI = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } };
     const candidates = [
+      { facingMode: { exact: 'environment' }, ...UHD },
       { facingMode: { exact: 'environment' }, ...HI },
       { facingMode: 'environment', ...HI },
-      { facingMode: { exact: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      { ...UHD },
       { ...HI },
       { width: { ideal: 1280 }, height: { ideal: 720 } },
       true,
