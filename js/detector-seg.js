@@ -185,22 +185,28 @@ function segWorkerSupported() {
 
 async function createSegDetectorWorker(onStatus) {
   onStatus('啟動背景執行緒…');
-  const worker = new Worker('js/seg-worker.js?v=cexp1');
+  const worker = new Worker('js/seg-worker.js?v=cexp2');
   const abs = m => new URL(m, location.href).href;
   const assignIds = _makeTracker();
+  // 方法 C：GPU 後處理，?noc 可關閉做 A/B 對照
+  const gpuPost = !new URLSearchParams(location.search).has('noc');
 
   const ready = await new Promise((resolve, reject) => {
     const to = setTimeout(() => reject(new Error('worker init 逾時')), 30000);
-    worker.onmessage = e => { if (e.data.type === 'ready') { clearTimeout(to); resolve(e.data); } };
+    worker.onmessage = e => {
+      if (e.data.type === 'ready') { clearTimeout(to); resolve(e.data); }
+      if (e.data.type === 'init-error') { clearTimeout(to); reject(new Error(e.data.error)); }
+    };
     worker.onerror = e => { clearTimeout(to); reject(new Error('worker error: ' + e.message)); };
     worker.postMessage({
       type: 'init',
       hires: { model: abs(SEG_HIRES.model), size: SEG_HIRES.size },
       lores: { model: abs(SEG_LORES.model), size: SEG_LORES.size },
       threads: Math.min(4, navigator.hardwareConcurrency || 4),
+      gpuPost,
     });
   });
-  onStatus(`背景執行緒就緒（${ready.size}）`);
+  onStatus(`背景執行緒就緒（${ready.size}${ready.gpuPost ? '·C' : ''}）`);
 
   let reqId = 0;
   const pending = new Map();
