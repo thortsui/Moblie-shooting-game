@@ -180,7 +180,7 @@ function segWorkerSupported() {
 
 async function createSegDetectorWorker(onStatus) {
   onStatus('啟動背景執行緒…');
-  const worker = new Worker('js/seg-worker.js?v=25');
+  const worker = new Worker('js/seg-worker.js?v=26');
   const abs = m => new URL(m, location.href).href;
   const assignIds = _makeTracker();
 
