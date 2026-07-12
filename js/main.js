@@ -113,10 +113,12 @@
   }
   window.addEventListener('resize', resizeOverlay);
 
-  /* ── 偵測迴圈 ── */
+  /* ── 偵測迴圈（方法A：節流到最多 ~12fps，保底 ≥10、把主線程讓給畫面）── */
+  const DET_MIN_INTERVAL = 83;   // 目標偵測間隔(ms)：1000/83≈12fps 上限
   let fpsCount = 0, fpsLast = performance.now(), detErrors = 0;
   async function detectLoop() {
     while (running) {
+      const tStart = performance.now();
       try {
         const result = await detector.detect(video);
         detErrors = 0;
@@ -150,14 +152,18 @@
       fpsCount++;
       const now = performance.now();
       if (now - fpsLast >= 1000) {
-        $('fpsText').textContent = fpsCount;
+        $('fpsText').textContent = `${fpsCount}/${renderFps}`;   // 偵測/畫面
         fpsCount = 0; fpsLast = now;
       }
-      await new Promise(r => setTimeout(r, 0));
+      // 節流：偵測快時補足間隔到 ~83ms(12fps 上限)，把剩餘時間讓給畫面繪製；偵測慢時全速跑
+      const elapsed = performance.now() - tStart;
+      const gap = Math.max(4, DET_MIN_INTERVAL - elapsed);
+      await new Promise(r => setTimeout(r, gap));
     }
   }
 
-  /* ── 渲染迴圈 ── */
+  /* ── 渲染迴圈（畫面層，獨立於偵測、跑滿幀）── */
+  let renderCount = 0, renderLast = performance.now(), renderFps = 0;
   function render() {
     if (!running) return;
     const now = performance.now();
@@ -168,6 +174,8 @@
     drawEffects(now);
     updateFireRing(now);
     updateSelfStatus(now);
+    renderCount++;
+    if (now - renderLast >= 1000) { renderFps = renderCount; renderCount = 0; renderLast = now; }
     requestAnimationFrame(render);
   }
 
