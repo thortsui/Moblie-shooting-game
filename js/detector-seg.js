@@ -12,8 +12,9 @@
  * }>
  */
 
-const SEG_SIZE = 192;
-const SEG_MODEL = 'models/seg_r2_192.onnx';
+// 依裝置選模型：WebGPU→384 高精準；WASM(舊機)→192 保流暢
+const SEG_HIRES = { model: 'models/seg_r3_384.onnx', size: 384 };
+const SEG_LORES = { model: 'models/seg_r2_192.onnx', size: 192 };
 const SEG_CONF = 0.35, SEG_NMS_IOU = 0.5, SEG_MASK_TH = 0.55;
 
 function _sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
@@ -21,16 +22,17 @@ function _sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
 async function createSegDetector(onStatus) {
   onStatus('載入 onnxruntime…');
   // onnxruntime-web 由 index.html 以 <script> 載入，全域 ort 可用
-  let backend = 'webgpu', sess = null;
+  let backend = 'webgpu', sess = null, cfg = SEG_HIRES;
   try {
-    sess = await ort.InferenceSession.create(SEG_MODEL, { executionProviders: ['webgpu'] });
+    sess = await ort.InferenceSession.create(SEG_HIRES.model, { executionProviders: ['webgpu'] });
   } catch (e) {
-    backend = 'wasm';
-    onStatus('WebGPU 不可用，改用 WASM…');
+    backend = 'wasm'; cfg = SEG_LORES;
+    onStatus('WebGPU 不可用，改用 WASM 流暢版…');
     ort.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 4);
-    sess = await ort.InferenceSession.create(SEG_MODEL, { executionProviders: ['wasm'] });
+    sess = await ort.InferenceSession.create(SEG_LORES.model, { executionProviders: ['wasm'] });
   }
-  onStatus('輪廓模型就緒');
+  const SEG_SIZE = cfg.size;
+  onStatus(`輪廓模型就緒（${SEG_SIZE}）`);
 
   const inName = sess.inputNames[0], outN = sess.outputNames;
   const pre = document.createElement('canvas'); pre.width = pre.height = SEG_SIZE;
