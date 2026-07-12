@@ -9,3 +9,5 @@ models/*.onnx
 
 # 訓練資料集（大型二進位，不上 web repo）
 訓練資料/
+
+_bench/
