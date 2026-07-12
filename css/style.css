@@ -213,7 +213,7 @@ input:focus { border-color: #e63946; }
 
 /* 槍的瞄準貼圖（第一人稱手槍） */
 #gunOverlay {
-  position: absolute; left: 50%; bottom: 0;   /* 再往右一點（與上次同距離）→ 置中 */
+  position: absolute; left: 51%; bottom: 0;   /* 再往右上次的 1/4（+1%） */
   transform: translateX(-50%);
   height: 46vh;                                /* 降低高度：槍口落在十字標下方 */
   pointer-events: none;
@@ -230,7 +230,7 @@ input:focus { border-color: #e63946; }
 
 /* 槍口火光（開火鍵上方） */
 #muzzleFlash {
-  position: absolute; left: 50%; bottom: 46vh;
+  position: absolute; left: 51%; bottom: 46vh;
   width: 80px; height: 80px; transform: translate(-50%, 50%);
   z-index: 3;
   border-radius: 50%; opacity: 0; pointer-events: none;
