@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>手機 FPS 測速</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#0d1117; color:#e6edf3; padding:16px; line-height:1.6; }
+  h1 { font-size:1.3rem; }
+  #dev { color:#8b949e; font-size:.85rem; word-break:break-all; }
+  table { width:100%; border-collapse:collapse; margin-top:12px; }
+  th,td { border:1px solid #30363d; padding:8px; text-align:center; }
+  th { background:#161b22; }
+  .fps { font-weight:700; font-size:1.1rem; }
+  .go { background:#238636; color:#fff; border:none; padding:14px 28px; border-radius:8px; font-size:1.1rem; margin:12px 0; }
+  #status { color:#58a6ff; }
+</style>
+</head>
+<body>
+<h1>🔫 手機偵測 FPS 測速</h1>
+<p id="dev"></p>
+<p>測試不同 AI 偵測解析度在<b>這台手機</b>上的純推論速度。</p>
+<button class="go" id="go">開始測速</button>
+<p id="status"></p>
+<table id="tbl"><thead><tr><th>解析度</th><th>後端</th><th>FPS</th><th>每張 ms</th></tr></thead><tbody></tbody></table>
+<p id="summary" style="color:#8b949e;font-size:.85rem;margin-top:16px"></p>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webgpu.min.js"></script>
+<script>
+const dev = document.getElementById('dev');
+dev.textContent = '裝置：' + navigator.userAgent;
+const CASES = [
+  { m:'models/seg_r3_256.onnx', s:256 },
+  { m:'models/seg_r3_192.onnx', s:192 },
+  { m:'models/seg_r3_128.onnx', s:128 },
+];
+async function pickBackend() {
+  try { await ort.InferenceSession.create('models/seg_r3_192.onnx', { executionProviders:['webgpu'] }); return 'webgpu'; }
+  catch { return 'wasm'; }
+}
+async function bench(model, size, ep) {
+  ort.env.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency||4);
+  const sess = await ort.InferenceSession.create(model, { executionProviders:[ep] });
+  const n = sess.inputNames[0];
+  const data = Float32Array.from({length:3*size*size}, ()=>Math.random());
+  const feed = { [n]: new ort.Tensor('float32', data, [1,3,size,size]) };
+  for (let i=0;i<3;i++) await sess.run(feed);
+  const N=20, t0=performance.now();
+  for (let i=0;i<N;i++) await sess.run(feed);
+  const ms=(performance.now()-t0)/N;
+  return { ms, fps:1000/ms };
+}
+document.getElementById('go').onclick = async () => {
+  const status = document.getElementById('status');
+  const tb = document.querySelector('#tbl tbody');
+  tb.innerHTML='';
+  status.textContent = '偵測後端…';
+  const ep = await pickBackend();
+  status.textContent = `後端：${ep}（${ep==='webgpu'?'新機、快':'舊機、慢'}）測試中…`;
+  const results=[];
+  for (const c of CASES) {
+    status.textContent = `測試 ${c.s}…`;
+    try {
+      const r = await bench(c.m, c.s, ep);
+      results.push({ size:c.s, ep, ...r });
+      tb.insertAdjacentHTML('beforeend', `<tr><td>${c.s}</td><td>${ep}</td><td class="fps">${r.fps.toFixed(0)}</td><td>${r.ms.toFixed(1)}</td></tr>`);
+    } catch(e) {
+      tb.insertAdjacentHTML('beforeend', `<tr><td>${c.s}</td><td>${ep}</td><td>失敗</td><td>${e.message.slice(0,20)}</td></tr>`);
+    }
+  }
+  status.textContent = '✅ 完成！把整張表截圖給開發者。';
+  document.getElementById('summary').textContent = '註：這是「純推論」fps，實際遊戲會再低一些（加上畫面繪製）。後端 webgpu=有硬體加速的新機，wasm=舊機軟體運算。';
+};
+</script>
+</body>
+</html>
