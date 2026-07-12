@@ -185,6 +185,7 @@ input:focus { border-color: #e63946; }
   position: absolute; bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
   left: 50%; transform: translateX(-50%);
   pointer-events: auto;
+  z-index: 20;   /* 永遠在槍貼圖之上，不被覆蓋 */
 }
 #fireBtn {
   position: relative; width: 92px; height: 92px; border-radius: 50%;
@@ -212,7 +213,7 @@ input:focus { border-color: #e63946; }
 
 /* 槍的瞄準貼圖（第一人稱手槍） */
 #gunOverlay {
-  position: absolute; left: 50%; bottom: 0;
+  position: absolute; left: 42%; bottom: 0;   /* 往左一點，準星偏左 */
   transform: translateX(-50%);
   height: 54vh;
   pointer-events: none;
