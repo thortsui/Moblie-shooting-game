@@ -101,7 +101,13 @@
   }
 
   function preloadDetector(onStatus) {
-    if (!detectorPromise) detectorPromise = createSegDetector(onStatus || (() => {}));
+    const cb = onStatus || (() => {});
+    if (!detectorPromise) {
+      // 方法 D：優先用 Web Worker 版（畫面不卡）；失敗自動退回主線程版
+      detectorPromise = segWorkerSupported()
+        ? createSegDetectorWorker(cb).catch(e => { console.warn('[worker] 退回主線程', e); return createSegDetector(cb); })
+        : createSegDetector(cb);
+    }
     return detectorPromise;
   }
 

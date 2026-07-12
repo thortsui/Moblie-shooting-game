@@ -153,6 +153,78 @@ async function createSegDetector(onStatus) {
   };
 }
 
+/* ── 方法 D：Web Worker 版偵測（推論+解碼在背景執行緒，主線程只顯示畫面）── */
+function _makeTracker() {
+  let tracks = [], nextId = 1;
+  return function assignIds(dets, now) {
+    const used = new Set();
+    for (const d of dets) {
+      const cx = (d.bbox.minX + d.bbox.maxX) / 2, cy = (d.bbox.minY + d.bbox.maxY) / 2;
+      const diag = Math.hypot(d.bbox.maxX - d.bbox.minX, d.bbox.maxY - d.bbox.minY);
+      let best = null, bestD = Infinity;
+      for (const t of tracks) {
+        if (used.has(t.id)) continue;
+        const dist = Math.hypot(cx - t.cx, cy - t.cy);
+        if (dist < Math.max(60, diag * 0.6) && dist < bestD) { bestD = dist; best = t; }
+      }
+      if (best) { d.id = best.id; best.cx = cx; best.cy = cy; best.lastSeen = now; used.add(best.id); }
+      else { d.id = nextId++; tracks.push({ id: d.id, cx, cy, lastSeen: now }); used.add(d.id); }
+    }
+    tracks = tracks.filter(t => now - t.lastSeen < 1500);
+  };
+}
+
+function segWorkerSupported() {
+  return typeof Worker !== 'undefined' && typeof OffscreenCanvas !== 'undefined' && typeof createImageBitmap === 'function';
+}
+
+async function createSegDetectorWorker(onStatus) {
+  onStatus('啟動背景執行緒…');
+  const worker = new Worker('js/seg-worker.js?v=25');
+  const abs = m => new URL(m, location.href).href;
+  const assignIds = _makeTracker();
+
+  const ready = await new Promise((resolve, reject) => {
+    const to = setTimeout(() => reject(new Error('worker init 逾時')), 30000);
+    worker.onmessage = e => { if (e.data.type === 'ready') { clearTimeout(to); resolve(e.data); } };
+    worker.onerror = e => { clearTimeout(to); reject(new Error('worker error: ' + e.message)); };
+    worker.postMessage({
+      type: 'init',
+      hires: { model: abs(SEG_HIRES.model), size: SEG_HIRES.size },
+      lores: { model: abs(SEG_LORES.model), size: SEG_LORES.size },
+      threads: Math.min(4, navigator.hardwareConcurrency || 4),
+    });
+  });
+  onStatus(`背景執行緒就緒（${ready.size}）`);
+
+  let reqId = 0;
+  const pending = new Map();
+  worker.onmessage = e => {
+    if (e.data.type === 'result') {
+      const p = pending.get(e.data.reqId);
+      if (p) { pending.delete(e.data.reqId); p(e.data.dets); }
+    }
+  };
+
+  return {
+    backend: ready.backend,
+    worker: true,
+    async detect(video) {
+      const vw = video.videoWidth, vh = video.videoHeight;
+      if (!vw) return [];
+      let bitmap;
+      try { bitmap = await createImageBitmap(video); } catch { return []; }
+      const id = ++reqId;
+      const dets = await new Promise(res => {
+        pending.set(id, res);
+        worker.postMessage({ type: 'frame', bitmap, vw, vh, reqId: id }, [bitmap]);
+      });
+      assignIds(dets, performance.now());
+      return dets;
+    },
+  };
+}
+
 /* ── 命中：影片座標點是否落在剪影內 ── */
 function segHitTest(det, px, py) {
   const tf = det._tf;
