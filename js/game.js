@@ -7,8 +7,8 @@
 
 const RULES = {
   maxHp: 100,
-  damage: { hit: 34, head: 50, torso: 25 },   // hit=剪影命中（方向C，3槍擊倒）；head/torso 保留備用
-  fireCooldownMs: 1000,   // 每槍 1 秒冷卻
+  damage: { hit: 5, head: 50, torso: 25 },   // hit=剪影命中（方向C，每發 5 傷害）
+  fireCooldownMs: 100,    // 射速：0.1 秒/發（全自動連發，免換彈）
   respawnMs: 5000,        // 擊倒後 5 秒重生
   targetForgetMs: 4000,   // 追蹤 ID 消失多久後遺忘該靶
   ghostKeepMs: 60000,     // 遺忘後血量以顏色檔案保留多久（出鏡再回來不回滿血）

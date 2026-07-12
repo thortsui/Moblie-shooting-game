@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=7">
+<link rel="stylesheet" href="css/style.css?v=8">
 </head>
 <body>
 
@@ -32,8 +32,8 @@
   </div>
 
   <ul class="rules">
-    <li>十字標對準人開火：軀幹 -25／爆頭 -50</li>
-    <li>每槍冷卻 1 秒，倒下 5 秒重生</li>
+    <li>按住開火鍵全自動連發（每發 -5）</li>
+    <li>十字標對準人的身體即命中，倒下 5 秒重生</li>
     <li>多人模式請每人穿不同的鮮豔顏色</li>
   </ul>
   <p id="loadStatus" class="status"></p>
@@ -83,6 +83,37 @@
     <div id="hitText"></div>
     <div id="killFeed"></div>
 
+    <!-- 槍的瞄準貼圖（第一人稱手槍，槍口朝十字標） -->
+    <div id="gunOverlay" aria-hidden="true">
+      <svg viewBox="0 0 400 300" preserveAspectRatio="xMidYMax meet">
+        <defs>
+          <linearGradient id="gmetal" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#0d1013"/>
+            <stop offset="0.45" stop-color="#3a4048"/>
+            <stop offset="0.55" stop-color="#4c535c"/>
+            <stop offset="1" stop-color="#12161a"/>
+          </linearGradient>
+          <linearGradient id="ggrip" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#2a2018"/>
+            <stop offset="1" stop-color="#0d0a07"/>
+          </linearGradient>
+        </defs>
+        <!-- 握把 -->
+        <path d="M232 300 L210 175 L272 190 L318 300 Z" fill="url(#ggrip)" stroke="#000" stroke-width="2"/>
+        <!-- 扳機護弓 -->
+        <path d="M196 180 q-26 8 -22 42 q18 -18 34 -14 Z" fill="#15191d" stroke="#000" stroke-width="2"/>
+        <!-- 滑套/槍管（透視梯形，槍口朝上=朝十字標） -->
+        <path d="M176 180 L188 78 L212 78 L224 180 Z" fill="url(#gmetal)" stroke="#000" stroke-width="2"/>
+        <!-- 槍管開口 -->
+        <ellipse cx="200" cy="80" rx="14" ry="6" fill="#05070a" stroke="#555" stroke-width="1.5"/>
+        <!-- 準星（前照門） -->
+        <rect x="196" y="66" width="8" height="14" rx="1.5" fill="#1a1d22" stroke="#000" stroke-width="1"/>
+        <rect x="198.5" y="68" width="3" height="10" fill="#e63946"/>
+        <!-- 滑套高光 -->
+        <path d="M190 172 L198 86 L202 86 L196 172 Z" fill="rgba(255,255,255,.12)"/>
+      </svg>
+    </div>
+
     <div id="muzzleFlash"></div>
 
     <div id="fireWrap">
@@ -106,11 +137,11 @@
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webgpu.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
 
-<script src="js/detector-seg.js?v=7"></script>
-<script src="js/game.js?v=7"></script>
-<script src="js/colorid.js?v=7"></script>
-<script src="js/net.js?v=7"></script>
-<script src="js/main.js?v=7"></script>
+<script src="js/detector-seg.js?v=8"></script>
+<script src="js/game.js?v=8"></script>
+<script src="js/colorid.js?v=8"></script>
+<script src="js/net.js?v=8"></script>
+<script src="js/main.js?v=8"></script>
 <script>
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>

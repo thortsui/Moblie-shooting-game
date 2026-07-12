@@ -273,7 +273,7 @@
       const p = (now - fx.t0) / fx.dur;
       if (p >= 1) { effects.splice(i, 1); continue; }
       const cx = overlay.width / 2, cy = overlay.height / 2;
-      const sx = cx, sy = overlay.height - 150 * devicePixelRatio;
+      const sx = cx, sy = overlay.height * 0.66;   // 由槍口射出
       ctx.save();
       ctx.globalAlpha = (1 - p) * 0.9;
       const grad = ctx.createLinearGradient(sx, sy, cx, cy);
@@ -309,10 +309,10 @@
     if (isMyDead(now)) return;
     fireCtl.fire(now);
     sfx.shot();
-    navigator.vibrate?.(30);
-    $('fireBtn').classList.add('cooldown');
-    effects.push({ t0: now, dur: 130 });
+    navigator.vibrate?.(15);
+    effects.push({ t0: now, dur: 90 });
     flashClass($('muzzleFlash'), 'show');
+    flashClass($('gunOverlay'), 'recoil');
     flashClass($('gameScreen'), 'shake');
 
     const t = coverTransform();
@@ -361,20 +361,8 @@
     flashClass(el, 'show');
   }
 
-  function updateFireRing(now) {
-    const p = fireCtl.progress(now);
-    const ring = $('fireRing'), btn = $('fireBtn');
-    if (p >= 1) {
-      ring.style.background = 'none';
-      btn.classList.remove('cooldown');
-    } else {
-      const deg = p * 360;
-      ring.style.background =
-        `conic-gradient(rgba(255,255,255,.85) ${deg}deg, rgba(0,0,0,.55) ${deg}deg)`;
-      ring.style.mask = 'radial-gradient(circle, transparent 62%, #000 63%)';
-      ring.style.webkitMask = 'radial-gradient(circle, transparent 62%, #000 63%)';
-    }
-  }
+  // 全自動連發（0.1 秒/發）不需要冷卻環顯示
+  function updateFireRing() {}
 
   /* ── 連線事件 ── */
   function bindNetEvents() {
@@ -544,8 +532,26 @@
     if (mode === 'host') net.start();
   });
 
-  $('fireBtn').addEventListener('touchstart', e => { e.preventDefault(); tryFire(); }, { passive: false });
-  $('fireBtn').addEventListener('mousedown', e => { if (e.button === 0) tryFire(); });
+  // 按住開火鍵 = 全自動連發（tryFire 內以射速冷卻節流）
+  let firing = false, fireTimer = null;
+  function startFire() {
+    if (firing) return;
+    firing = true;
+    $('fireBtn').classList.add('firing');
+    const loop = () => { if (!firing) return; tryFire(); fireTimer = setTimeout(loop, 20); };
+    loop();
+  }
+  function stopFire() {
+    firing = false;
+    clearTimeout(fireTimer);
+    $('fireBtn').classList.remove('firing');
+  }
+  const fb = $('fireBtn');
+  fb.addEventListener('touchstart', e => { e.preventDefault(); startFire(); }, { passive: false });
+  fb.addEventListener('touchend', e => { e.preventDefault(); stopFire(); }, { passive: false });
+  fb.addEventListener('touchcancel', stopFire);
+  fb.addEventListener('mousedown', e => { if (e.button === 0) startFire(); });
+  window.addEventListener('mouseup', stopFire);
 
   // 一開頁面就在背景預載模型（不等使用者按按鈕），大幅縮短進入遊戲的等待
   preloadDetector(msg => alertStatus(msg))
