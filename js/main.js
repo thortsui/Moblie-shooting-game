@@ -554,6 +554,15 @@
     if (mode === 'host') net.start();
   });
 
+  // ?solo=1 → 單機測試專用頁（只留單機按鈕，跟正式對戰頁分開）
+  if (new URLSearchParams(location.search).has('solo')) {
+    $('hostBtn').style.display = 'none';
+    document.querySelector('.join-row').style.display = 'none';
+    $('nameInput').style.display = 'none';
+    $('soloBtn').textContent = '🎯 開始單機測試';
+    $('soloBtn').classList.add('primary');
+  }
+
   // 按住開火鍵 = 全自動連發（tryFire 內以射速冷卻節流）
   let firing = false, fireTimer = null;
   function startFire() {
