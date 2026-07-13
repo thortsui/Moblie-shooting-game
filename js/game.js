@@ -73,15 +73,19 @@ class TargetRegistry {
       const person = this.persons.get(tm.personId);
       person.lastSeen = now;
       if (pos) { person.lastPos = { x: pos.x, y: pos.y }; person.lastSize = pos.size; }
-      // 顏色檔案緩慢更新，適應光線漸變
+      // 顏色檔案緩慢更新，適應光線漸變。
+      // 只在高信心（取樣色與檔案夠近）時才寫入——邊緣案例只讀不寫，
+      // 避免認錯人時互相污染檔案造成「越錯越錯」的身分互換。
       if (color) {
-        person.color = person.color
-          ? {
-              h: lerpHue(person.color.h, color.h, 0.15),
-              s: person.color.s + (color.s - person.color.s) * 0.15,
-              v: person.color.v + (color.v - person.color.v) * 0.15,
-            }
-          : color;
+        if (!person.color) {
+          person.color = color;
+        } else if (colorDistance(person.color, color) < 0.35) {
+          person.color = {
+            h: lerpHue(person.color.h, color.h, 0.15),
+            s: person.color.s + (color.s - person.color.s) * 0.15,
+            v: person.color.v + (color.v - person.color.v) * 0.15,
+          };
+        }
       }
       // 重生
       if (person.deadUntil && now >= person.deadUntil) {
