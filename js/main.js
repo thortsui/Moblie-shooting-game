@@ -18,9 +18,11 @@
   let prevMyHp = RULES.maxHp;
   let myColor = null;
   let soloKills = 0;
+  let myWeaponId = DEFAULT_WEAPON_ID;      // 開戰前選定；遊戲進行中不可換
+  const myWeapon = () => weaponById(myWeaponId) || WEAPONS[0];
 
   const registry = new TargetRegistry();   // solo 模式用
-  const fireCtl = new FireControl();
+  const fireCtl = new FireControl(myWeapon().cooldownMs);
   const sfx = new Sfx();
 
   let detector = null, detectorPromise = null;
@@ -369,24 +371,25 @@
     }
     if (!best) return;
 
+    const dmg = myWeapon().body;   // 現行只判剪影內外，一律吃武器的軀幹傷害
     if (mode === 'solo') {
-      const result = registry.takeDamage(best.det.id, 'hit', now);
+      const result = registry.takeDamage(best.det.id, 'hit', now, dmg);
       if (!result) return;
-      hitFeedback(result.killed, `P${result.personId}`);
+      hitFeedback(result.killed, `P${result.personId}`, dmg);
       if (result.killed) { soloKills++; $('killsText').textContent = soloKills; }
     } else {
-      net.sendHit(best.det.pid, 'hit');               // 房主權威判定
+      net.sendHit(best.det.pid, 'hit', dmg);          // 房主權威判定（帶上武器實際傷害）
       const name = net.players.find(p => p.pid === best.det.pid)?.name ?? '';
-      hitFeedback(false, name);                       // 樂觀回饋（擊倒訊息等房主廣播）
+      hitFeedback(false, name, dmg);                  // 樂觀回饋（擊倒訊息等房主廣播）
     }
   }
 
-  function hitFeedback(killed, name) {
+  function hitFeedback(killed, name, dmg) {
     sfx.hit(false);
     navigator.vibrate?.(60);
     flashClass($('hitMarker'), 'show');
     if (killed) { sfx.kill(); showHitText(`💀 擊倒 ${name}！`); }
-    else showHitText(`-${RULES.damage.hit}`);
+    else showHitText(`-${dmg}`);
   }
 
   function flashClass(el, cls) {
@@ -400,8 +403,60 @@
     flashClass(el, 'show');
   }
 
-  // 全自動連發（0.1 秒/發）不需要冷卻環顯示
-  function updateFireRing() {}
+  // 冷卻進度環：慢射速武器（如狙擊 2.5 秒）看得到什麼時候能再開槍
+  let _ringActive = false;
+  function updateFireRing(now) {
+    const p = fireCtl.progress(now);
+    if (p >= 1) {
+      if (_ringActive) {
+        $('fireRing').style.background = 'none';
+        $('fireBtn').classList.remove('cooldown');
+        _ringActive = false;
+      }
+      return;
+    }
+    _ringActive = true;
+    $('fireBtn').classList.add('cooldown');
+    $('fireRing').style.background =
+      `conic-gradient(#ffd166 ${p * 360}deg, rgba(255,255,255,.18) ${p * 360}deg)`;
+  }
+
+  /* ── 武器選擇（主選單；遊戲進行中不可換） ── */
+  function fmtRate(ms) {
+    return `${parseFloat((ms / 1000).toFixed(2))} 秒/發`;   // 1000→1、1200→1.2、450→0.45
+  }
+  function renderWeaponList() {
+    const list = $('weaponList');
+    list.innerHTML = '';
+    for (const w of WEAPONS) {
+      const btn = document.createElement('button');
+      btn.className = 'weapon-btn' + (w.id === myWeaponId ? ' selected' : '');
+      const name = document.createElement('span');
+      name.className = 'w-name';
+      name.textContent = w.name;
+      const stat = document.createElement('span');
+      stat.className = 'w-stat';
+      stat.textContent = `傷害 ${w.body}｜${fmtRate(w.cooldownMs)}`;
+      btn.append(name, stat);
+      btn.addEventListener('click', () => selectWeapon(w.id));
+      list.appendChild(btn);
+    }
+  }
+  function selectWeapon(id) {
+    if (running || !weaponById(id)) return;   // 開戰後不可換
+    myWeaponId = id;
+    fireCtl.cooldownMs = myWeapon().cooldownMs;
+    renderWeaponList();
+    updateGunImage();
+    net?.sendWeapon?.(id);   // 已在房間裡就同步給其他玩家（僅顯示用）
+  }
+
+  /** 依所選武器換槍圖；圖檔還沒就位時 fallback 回預設 gun.png */
+  function updateGunImage() {
+    const img = $('gunImg');
+    img.onerror = () => { img.onerror = null; img.src = 'assets/gun.png?v=31'; };
+    img.src = `assets/guns/${myWeaponId}.png?v=31`;
+  }
 
   /* ── 連線事件 ── */
   function bindNetEvents() {
@@ -448,10 +503,13 @@
       chip.style.background = hsvToCss(p.color);
       const name = document.createElement('span');
       name.textContent = p.pid === net.myPid ? `${p.name}（你）` : p.name;
+      const weapon = document.createElement('span');
+      weapon.className = 'player-weapon';
+      weapon.textContent = weaponById(p.weapon)?.name ?? '';   // 舊版房主沒有 weapon 欄位就留空
       const ready = document.createElement('span');
       if (p.offline) { ready.className = 'not-ready'; ready.textContent = '📴 斷線中'; }
       else { ready.className = p.color ? 'ready' : 'not-ready'; ready.textContent = p.color ? '✔ 已登錄' : '未取樣'; }
-      row.append(chip, name, ready);
+      row.append(chip, name, weapon, ready);
       list.appendChild(row);
     }
     if (mode === 'host') {
@@ -498,6 +556,8 @@
       }
       resizeOverlay();
       try { await navigator.wakeLock?.request('screen'); } catch {}
+      updateGunImage();                            // 依所選武器換槍圖
+      fireCtl.cooldownMs = myWeapon().cooldownMs;  // 開戰後鎖定射速（進行中不可換）
       prevMyHp = RULES.maxHp;
       if (!running) {
         running = true;
@@ -532,6 +592,7 @@
       $('lobbyHint').textContent = '把房號唸給朋友輸入加入';
       $('startGameBtn').classList.remove('hidden');
       $('startGameBtn').disabled = true;
+      net.sendWeapon(myWeaponId);   // 把主選單選好的武器登記到玩家名單
       enterLobby();
       renderPlayerList(net.players);
     });
@@ -548,6 +609,7 @@
       $('roomCodeText').textContent = code;
       $('lobbyHint').textContent = '等待房主開始遊戲…';
       $('startGameBtn').classList.add('hidden');
+      net.sendWeapon(myWeaponId);   // 把主選單選好的武器同步給房主
       enterLobby();
     });
   });
@@ -570,6 +632,8 @@
   $('startGameBtn').addEventListener('click', () => {
     if (mode === 'host') net.start();
   });
+
+  renderWeaponList();   // 主選單武器列（預設手槍）
 
   // ?solo=1 → 單機測試專用頁（只留單機按鈕，跟正式對戰頁分開）
   if (new URLSearchParams(location.search).has('solo')) {

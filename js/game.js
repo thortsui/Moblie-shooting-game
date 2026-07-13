@@ -7,12 +7,32 @@
 
 const RULES = {
   maxHp: 100,
-  damage: { hit: 5, head: 50, torso: 25 },   // hit=剪影命中（方向C，每發 5 傷害）
-  fireCooldownMs: 100,    // 射速：0.1 秒/發（全自動連發，免換彈）
+  damage: { hit: 5, head: 50, torso: 25 },   // hit=剪影命中（舊版相容用；實際傷害看所選武器）
+  fireCooldownMs: 100,    // 舊版預設射速（FireControl 建構子預設值；實際射速看所選武器）
   respawnMs: 5000,        // 擊倒後 5 秒重生
   targetForgetMs: 4000,   // 追蹤 ID 消失多久後遺忘該靶
   ghostKeepMs: 60000,     // 遺忘後血量以顏色檔案保留多久（出鏡再回來不回滿血）
 };
+
+/** 武器表（開戰前選定，遊戲中不可換）。
+    body=剪影命中傷害（現行只判剪影內外，一律吃 body）；
+    head 保留給未來部位判定用；cooldownMs=每發冷卻。 */
+const WEAPONS = [
+  { id: 'pistol',  name: '手槍',   body: 25, head: 50,  cooldownMs: 1000,
+    note: '預設均衡槍：四槍中身、兩槍爆頭，1 秒一發穩定好上手。' },
+  { id: 'rifle',   name: '步槍',   body: 34, head: 68,  cooldownMs: 1200,
+    note: '沉穩主力：三槍中身即倒（2.4 秒），但爆頭對決略慢於手槍。' },
+  { id: 'smg',     name: '衝鋒槍', body: 12, head: 20,  cooldownMs: 450,
+    note: '潑水流：射速最快、單發最輕，打不太準也能靠連發補回來。' },
+  { id: 'shotgun', name: '散彈槍', body: 40, head: 60,  cooldownMs: 1500,
+    note: '近身重擊：單發軀幹傷害僅次於狙擊，但爆頭加成最小。' },
+  { id: 'sniper',  name: '狙擊槍', body: 70, head: 100, cooldownMs: 2500,
+    note: '一發爆頭直接帶走、中身兩發，但 2.5 秒才能再開一槍。' },
+];
+const DEFAULT_WEAPON_ID = 'pistol';
+
+/** 以 id 取武器；未知 id（含舊版沒送）回傳 null */
+function weaponById(id) { return WEAPONS.find(w => w.id === id) || null; }
 
 /** 場上目標的「人物檔案」登記表。
     每個被掃描到的人建立一個專屬 ID（P1、P2…整場不變）；
@@ -113,11 +133,11 @@ class TargetRegistry {
     return !!(p && p.deadUntil && now < p.deadUntil);
   }
 
-  /** 對目標造成傷害。回傳 {hp, killed, personId} */
-  takeDamage(trackId, part, now) {
+  /** 對目標造成傷害。dmg 未給時退回 RULES.damage[part]（舊版行為）。回傳 {hp, killed, personId} */
+  takeDamage(trackId, part, now, dmg) {
     const p = this._person(trackId);
     if (!p || (p.deadUntil && now < p.deadUntil)) return null;
-    p.hp = Math.max(0, p.hp - RULES.damage[part]);
+    p.hp = Math.max(0, p.hp - (dmg ?? RULES.damage[part]));
     let killed = false;
     if (p.hp === 0) {
       p.deadUntil = now + RULES.respawnMs;
@@ -127,14 +147,17 @@ class TargetRegistry {
   }
 }
 
-/** 開火冷卻控制 */
+/** 開火冷卻控制（冷卻毫秒數可依所選武器調整） */
 class FireControl {
-  constructor() { this.lastFire = -Infinity; }
-  canFire(now) { return now - this.lastFire >= RULES.fireCooldownMs; }
+  constructor(cooldownMs = RULES.fireCooldownMs) {
+    this.lastFire = -Infinity;
+    this.cooldownMs = cooldownMs;
+  }
+  canFire(now) { return now - this.lastFire >= this.cooldownMs; }
   fire(now) { this.lastFire = now; }
   /** 冷卻進度 0(剛開完槍)~1(可再開火) */
   progress(now) {
-    return Math.min(1, (now - this.lastFire) / RULES.fireCooldownMs);
+    return Math.min(1, (now - this.lastFire) / this.cooldownMs);
   }
 }
 

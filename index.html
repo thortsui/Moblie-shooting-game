@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=30">
+<link rel="stylesheet" href="css/style.css?v=31">
 </head>
 <body>
 
@@ -21,6 +21,12 @@
   <p class="subtitle">手機 AR 槍戰</p>
 
   <input id="nameInput" type="text" maxlength="8" placeholder="你的名字" autocomplete="off">
+
+  <!-- 武器選擇（開戰前選定，遊戲中不可換；按鈕由 main.js 依 WEAPONS 產生） -->
+  <div id="weaponBox">
+    <p class="weapon-title">🔫 選擇武器</p>
+    <div id="weaponList"></div>
+  </div>
 
   <div class="menu-btns">
     <button id="soloBtn" class="menu-btn">🎯 單機練習</button>
@@ -32,7 +38,7 @@
   </div>
 
   <ul class="rules">
-    <li>按住開火鍵全自動連發（每發 -5）</li>
+    <li>每把槍的傷害與射速不同，開戰前先選好</li>
     <li>十字標對準人的身體即命中，倒下 5 秒重生</li>
     <li>多人模式請每人穿不同的鮮豔顏色</li>
   </ul>
@@ -83,9 +89,9 @@
     <div id="hitText"></div>
     <div id="killFeed"></div>
 
-    <!-- 槍的瞄準貼圖（真實第一人稱手槍照片，準星朝十字標） -->
+    <!-- 槍的瞄準貼圖（依所選武器換圖；載入失敗 fallback 回 gun.png，見 main.js updateGunImage） -->
     <div id="gunOverlay" aria-hidden="true">
-      <img src="assets/gun.png?v=30" alt="">
+      <img id="gunImg" src="assets/gun.png?v=31" alt="">
     </div>
 
     <div id="muzzleFlash"></div>
@@ -111,11 +117,11 @@
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webgpu.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
 
-<script src="js/detector-seg.js?v=30"></script>
-<script src="js/game.js?v=30"></script>
-<script src="js/colorid.js?v=30"></script>
-<script src="js/net.js?v=30"></script>
-<script src="js/main.js?v=30"></script>
+<script src="js/detector-seg.js?v=31"></script>
+<script src="js/game.js?v=31"></script>
+<script src="js/colorid.js?v=31"></script>
+<script src="js/net.js?v=31"></script>
+<script src="js/main.js?v=31"></script>
 <script>
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>

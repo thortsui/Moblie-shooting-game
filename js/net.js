@@ -5,7 +5,9 @@
  * 玩家手機本地判定命中後送 {t:'hit'} 給房主，房主計算扣血並廣播 {t:'state'}。
  *
  * 訊息協定：
- *   client→host : {t:'join', name} {t:'color', color} {t:'hit', victim, part}
+ *   client→host : {t:'join', name} {t:'color', color} {t:'weapon', weapon}
+ *                 {t:'hit', victim, part, dmg}
+ *                 （dmg=射手端算好的實際傷害；舊版沒送 dmg 時退回 RULES.damage[part]）
  *   host→client : {t:'welcome', pid} {t:'players', players} {t:'start'}
  *                 {t:'state', hp, deadRemain, kills} {t:'kill', killer, victim}
  */
@@ -32,7 +34,7 @@ class HostNet extends NetBase {
     this.myPid = 0;
     this.nextPid = 1;
     this.conns = new Map();                    // pid -> DataConnection
-    this.players = [{ pid: 0, name: myName, color: null }];
+    this.players = [{ pid: 0, name: myName, color: null, weapon: DEFAULT_WEAPON_ID }];
     this.state = { hp: { 0: RULES.maxHp }, deadUntil: {}, kills: { 0: 0 } };
     this.started = false;
     this._open();
@@ -85,7 +87,7 @@ class HostNet extends NetBase {
         const pid = this.nextPid++;
         conn._pid = pid;
         this.conns.set(pid, conn);
-        this.players.push({ pid, name: name || `玩家${pid}`, color: null });
+        this.players.push({ pid, name: name || `玩家${pid}`, color: null, weapon: DEFAULT_WEAPON_ID });
         this.state.hp[pid] = RULES.maxHp;
         this.state.kills[pid] = 0;
         conn.send({ t: 'welcome', pid });
@@ -99,8 +101,13 @@ class HostNet extends NetBase {
         if (p && d.color) { p.color = d.color; this._broadcastPlayers(); }
         break;
       }
+      case 'weapon': {
+        const p = this.players.find(p => p.pid === conn._pid);
+        if (p && weaponById(d.weapon)) { p.weapon = d.weapon; this._broadcastPlayers(); }
+        break;
+      }
       case 'hit':
-        this.applyHit(conn._pid, d.victim, d.part);
+        this.applyHit(conn._pid, d.victim, d.part, d.dmg);
         break;
     }
   }
@@ -115,6 +122,9 @@ class HostNet extends NetBase {
   }
 
   setMyColor(color) { this.players[0].color = color; this._broadcastPlayers(); }
+  setMyWeapon(weapon) {
+    if (weaponById(weapon)) { this.players[0].weapon = weapon; this._broadcastPlayers(); }
+  }
 
   start() {
     if (this.started) return;
@@ -125,15 +135,19 @@ class HostNet extends NetBase {
     this._broadcastState();
   }
 
-  /** 權威扣血：shooter 打中 victim 的 part */
-  applyHit(shooter, victim, part) {
+  /** 權威扣血：shooter 打中 victim 的 part。
+      dmg=射手端算好的實際傷害（依所選武器）；舊版 client 沒送 dmg 時退回 RULES.damage[part]。 */
+  applyHit(shooter, victim, part, dmg) {
     const now = Date.now();
     if (!this.started) return;
     if (!(victim in this.state.hp) || shooter === victim) return;
     if (this._isDead(shooter, now) || this._isDead(victim, now)) return;
-    const dmg = RULES.damage[part];
-    if (!dmg) return;
-    this.state.hp[victim] = Math.max(0, this.state.hp[victim] - dmg);
+    let val = Number(dmg);
+    // 退回路徑只認 damage 表自有的部位鍵，防 '__proto__' 之類的鍵取到原型物件變 NaN
+    if (!Number.isFinite(val) || val <= 0) val = Object.hasOwn(RULES.damage, part) ? RULES.damage[part] : 0;
+    if (!Number.isFinite(val) || val <= 0) return;
+    val = Math.min(RULES.maxHp, Math.max(1, Math.round(val)));   // 夾住範圍，防亂送
+    this.state.hp[victim] = Math.max(0, this.state.hp[victim] - val);
     if (this.state.hp[victim] === 0) {
       this.state.deadUntil[victim] = now + RULES.respawnMs;
       this.state.kills[shooter] = (this.state.kills[shooter] || 0) + 1;
@@ -146,8 +160,9 @@ class HostNet extends NetBase {
   }
 
   /** 房主自己開槍 */
-  sendHit(victim, part) { this.applyHit(0, victim, part); }
+  sendHit(victim, part, dmg) { this.applyHit(0, victim, part, dmg); }
   sendColor(color) { this.setMyColor(color); }
+  sendWeapon(weapon) { this.setMyWeapon(weapon); }
 
   _isDead(pid, now) { return (this.state.deadUntil[pid] || 0) > now; }
 
@@ -165,7 +180,7 @@ class HostNet extends NetBase {
   }
 
   _broadcastPlayers() {
-    const pub = this.players.map(({ pid, name, color, offline }) => ({ pid, name, color, offline: !!offline }));
+    const pub = this.players.map(({ pid, name, color, weapon, offline }) => ({ pid, name, color, weapon, offline: !!offline }));
     this._bcast({ t: 'players', players: pub });
     this.emit('players', pub);
   }
@@ -251,6 +266,7 @@ class ClientNet extends NetBase {
   }
 
   sendColor(color) { if (this.conn?.open) this.conn.send({ t: 'color', color }); }
-  sendHit(victim, part) { if (this.conn?.open) this.conn.send({ t: 'hit', victim, part }); }
+  sendWeapon(weapon) { if (this.conn?.open) this.conn.send({ t: 'weapon', weapon }); }
+  sendHit(victim, part, dmg) { if (this.conn?.open) this.conn.send({ t: 'hit', victim, part, dmg }); }
   destroy() { this._destroyed = true; clearTimeout(this._rejoinTimer); this.peer?.destroy(); }
 }

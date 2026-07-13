@@ -34,6 +34,28 @@ input[type="text"], input[type="tel"] {
 }
 input:focus { border-color: #e63946; }
 
+/* ── 武器選擇（主選單） ── */
+#weaponBox { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
+.weapon-title { color: #8fb8d8; font-size: .9rem; }
+#weaponList {
+  display: flex; gap: 8px; max-width: 100%;
+  overflow-x: auto; padding: 4px 6px;
+  -webkit-overflow-scrolling: touch;
+}
+.weapon-btn {
+  flex-shrink: 0; padding: 8px 12px; text-align: center;
+  border: 1px solid #3a4a5a; border-radius: 12px;
+  background: rgba(255,255,255,.08); color: #fff;
+  -webkit-tap-highlight-color: transparent;
+}
+.weapon-btn .w-name { display: block; font-size: .95rem; font-weight: 700; }
+.weapon-btn .w-stat { display: block; font-size: .72rem; color: #9ab; margin-top: 2px; white-space: nowrap; }
+.weapon-btn.selected {
+  border-color: #e63946; background: rgba(230,57,70,.22);
+  box-shadow: 0 0 14px rgba(230,57,70,.45);
+}
+.weapon-btn.selected .w-stat { color: #ffd166; }
+
 .menu-btns { display: flex; flex-direction: column; gap: 12px; align-items: center; }
 .menu-btn {
   padding: 13px 40px; font-size: 1.15rem; font-weight: 700;
@@ -65,6 +87,7 @@ input:focus { border-color: #e63946; }
   width: 22px; height: 22px; border-radius: 50%;
   border: 2px solid rgba(255,255,255,.6); flex-shrink: 0;
 }
+.player-weapon { font-size: .8rem; color: #8fb8d8; white-space: nowrap; }
 .player-row .ready { margin-left: auto; font-size: .85rem; color: #2ecc71; }
 .player-row .not-ready { margin-left: auto; font-size: .85rem; color: #f39c12; }
 
@@ -201,10 +224,12 @@ input:focus { border-color: #e63946; }
 #fireBtn:active { transform: scale(.93); }
 #fireBtn.cooldown { filter: grayscale(.8) brightness(.7); }
 .fire-icon { font-size: 2.2rem; pointer-events: none; }
-/* 冷卻進度環（JS 以 conic-gradient 更新） */
+/* 冷卻進度環（JS 以 conic-gradient 更新；mask 只留外圈細環，不遮住按鈕圖示） */
 #fireRing {
   position: absolute; inset: -3px; border-radius: 50%;
   pointer-events: none;
+  -webkit-mask: radial-gradient(closest-side, transparent calc(100% - 6px), #000 calc(100% - 5px));
+  mask: radial-gradient(closest-side, transparent calc(100% - 6px), #000 calc(100% - 5px));
 }
 
 /* FPS */
