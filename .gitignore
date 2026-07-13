@@ -18,3 +18,6 @@ IMG_*.jpg
 
 # 槍圖原始素材（大型 JPG，不進 git；出處見 assets/guns/sources.md）
 assets/guns_raw/
+
+# 內嵌圖片的總覽頁（~2MB，遵守大檔不進 git 原則）
+工作日誌/玩家UI-換槍總覽-*.html
