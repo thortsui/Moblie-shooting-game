@@ -124,6 +124,7 @@
 
   /* ── 偵測迴圈（方法A：節流到最多 ~12fps，保底 ≥10、把主線程讓給畫面）── */
   const DET_MIN_INTERVAL = new URLSearchParams(location.search).has('max') ? 0 : 83;   // ?max=1 拿掉節流量最高fps
+  const DET_PERSIST_MS = 600;   // 單幀漏抓時沿用舊遮罩的時限（開火不因偵測斷幀落空）
   let fpsCount = 0, fpsLast = performance.now(), detErrors = 0;
   async function detectLoop() {
     while (running) {
@@ -152,6 +153,15 @@
           for (const det of result) {
             det.pid = classifyPlayer(segColorSample(video, det), net.players, net.myPid);
           }
+        }
+        // 遮罩延續：這一幀沒接上的目標（偵測偶發漏抓），沿用上一幀的遮罩一小段時間，
+        // 開火命中判定永遠有「最近可用」的剪影可打，不因單幀漏抓而落空。
+        const tNow = performance.now();
+        for (const det of result) det._seen = tNow;
+        const freshIds = new Set(result.map(d => d.id));
+        for (const old of poses) {
+          if (freshIds.has(old.id)) continue;
+          if (tNow - (old._seen || 0) < DET_PERSIST_MS) result.push(old);
         }
         poses = result;
       } catch (e) {
@@ -454,8 +464,8 @@
   /** 依所選武器換槍圖；圖檔還沒就位時 fallback 回預設 gun.png */
   function updateGunImage() {
     const img = $('gunImg');
-    img.onerror = () => { img.onerror = null; img.src = 'assets/gun.png?v=34'; };
-    img.src = `assets/guns/${myWeaponId}.png?v=34`;
+    img.onerror = () => { img.onerror = null; img.src = 'assets/gun.png?v=35'; };
+    img.src = `assets/guns/${myWeaponId}.png?v=35`;
   }
 
   /* ── 連線事件 ── */
