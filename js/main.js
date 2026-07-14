@@ -554,8 +554,8 @@
   /** 依所選武器換槍圖；圖檔還沒就位時 fallback 回預設 gun.png */
   function updateGunImage() {
     const img = $('gunImg');
-    img.onerror = () => { img.onerror = null; img.src = 'assets/gun.png?v=37'; };
-    img.src = `assets/guns/${myWeaponId}.png?v=37`;
+    img.onerror = () => { img.onerror = null; img.src = 'assets/gun.png?v=38'; };
+    img.src = `assets/guns/${myWeaponId}.png?v=38`;
   }
 
   /* ── 連線事件 ── */

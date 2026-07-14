@@ -17,9 +17,9 @@
 //   WASM(舊機)＝被運算量卡住，降解析度大幅加速 → 用 128 保流暢
 const _hq = typeof location !== 'undefined' && new URLSearchParams(location.search).has('hq');
 const SEG_HIRES = _hq
-  ? { model: 'models/seg_r8_256.onnx', size: 256 }
-  : { model: 'models/seg_r8_192.onnx', size: 192 };
-const SEG_LORES = { model: 'models/seg_r8_128.onnx', size: 128 };
+  ? { model: 'models/seg_r9_256.onnx', size: 256 }
+  : { model: 'models/seg_r9_192.onnx', size: 192 };
+const SEG_LORES = { model: 'models/seg_r9_128.onnx', size: 128 };
 // 信心門檻「準星中央加權」：中央（瞄準區）0.25、邊緣 0.35（v34 的 0.18/0.30 誤判偏高，往回收）；
 // NMS 0.6→重疊的多位玩家不互吃；MASK_TH 0.5→剪影貼身剛剛好（v35 前刻意放大，使用者要求改貼身）
 const SEG_CONF_CENTER = 0.25, SEG_CONF_EDGE = 0.35, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.5;
