@@ -316,25 +316,78 @@
     ctx.closePath();
   }
 
-  /* ── 開火特效 ── */
+  /* ── 開火特效（依武器：曳光/散彈扇/狙擊光束/火箭飛行+爆風）── */
   const effects = [];
   function drawEffects(now) {
+    const cx = overlay.width / 2, cy = overlay.height / 2;
+    const sx = cx, sy = overlay.height * 0.66;   // 由槍口射出
+    const dpr = devicePixelRatio;
     for (let i = effects.length - 1; i >= 0; i--) {
       const fx = effects[i];
       const p = (now - fx.t0) / fx.dur;
       if (p >= 1) { effects.splice(i, 1); continue; }
-      const cx = overlay.width / 2, cy = overlay.height / 2;
-      const sx = cx, sy = overlay.height * 0.66;   // 由槍口射出
+      const col = fx.color || '255,210,90';
       ctx.save();
-      ctx.globalAlpha = (1 - p) * 0.9;
-      const grad = ctx.createLinearGradient(sx, sy, cx, cy);
-      grad.addColorStop(0, 'rgba(255,210,90,1)');
-      grad.addColorStop(1, 'rgba(255,255,255,.2)');
-      ctx.strokeStyle = grad;
-      ctx.lineWidth = (4 - 3 * p) * devicePixelRatio;
-      ctx.shadowColor = 'rgba(255,180,60,.9)';
-      ctx.shadowBlur = 12 * devicePixelRatio;
-      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(cx, cy); ctx.stroke();
+      switch (fx.type) {
+        case 'pellets': {   // 散彈：扇形多道細曳光 + 末端彈孔點
+          ctx.globalAlpha = (1 - p) * 0.85;
+          for (const a of fx.angles) {
+            const ex = cx + Math.sin(a) * overlay.width * 0.5 * fx.spreadPx;
+            const ey = cy + Math.cos(a) * overlay.width * 0.5 * fx.spreadPx * 0.6 - 0;
+            ctx.strokeStyle = `rgba(${col},.9)`;
+            ctx.lineWidth = 2 * dpr;
+            ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke();
+            ctx.fillStyle = `rgba(${col},.9)`;
+            ctx.beginPath(); ctx.arc(ex, ey, 3 * dpr * (1 - p), 0, Math.PI * 2); ctx.fill();
+          }
+          break;
+        }
+        case 'beam': {      // 狙擊：亮細光束、殘留較久
+          ctx.globalAlpha = (1 - p);
+          ctx.strokeStyle = `rgba(${col},.95)`;
+          ctx.lineWidth = fx.width * dpr;
+          ctx.shadowColor = `rgba(${col},.9)`;
+          ctx.shadowBlur = 18 * dpr;
+          ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(cx, cy); ctx.stroke();
+          break;
+        }
+        case 'rocket': {    // 火箭：彈頭由槍口飛向準星 + 尾焰
+          const rx = sx + (cx - sx) * p, ry = sy + (cy - sy) * p;
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = `rgba(${col},1)`;
+          ctx.shadowColor = `rgba(${col},.9)`;
+          ctx.shadowBlur = 16 * dpr;
+          ctx.beginPath(); ctx.arc(rx, ry, 6 * dpr * (1 - p * 0.5), 0, Math.PI * 2); ctx.fill();
+          ctx.globalAlpha = 0.55;
+          ctx.strokeStyle = `rgba(${col},.7)`;
+          ctx.lineWidth = 4 * dpr * (1 - p);
+          ctx.beginPath(); ctx.moveTo(sx + (cx - sx) * Math.max(0, p - 0.25), sy + (cy - sy) * Math.max(0, p - 0.25));
+          ctx.lineTo(rx, ry); ctx.stroke();
+          break;
+        }
+        case 'blast': {     // 爆風：擴張圓環 + 內部光暈
+          const r = fx.radius * (0.4 + 0.6 * p);
+          ctx.globalAlpha = (1 - p) * 0.9;
+          ctx.strokeStyle = `rgba(${col},.95)`;
+          ctx.lineWidth = 6 * dpr * (1 - p);
+          ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+          ctx.globalAlpha = (1 - p) * 0.35;
+          ctx.fillStyle = `rgba(${col},.8)`;
+          ctx.beginPath(); ctx.arc(cx, cy, r * 0.8, 0, Math.PI * 2); ctx.fill();
+          break;
+        }
+        default: {          // tracer：單道曳光（手槍/步槍/衝鋒槍，粗細顏色不同）
+          ctx.globalAlpha = (1 - p) * 0.9;
+          const grad = ctx.createLinearGradient(sx, sy, cx, cy);
+          grad.addColorStop(0, `rgba(${col},1)`);
+          grad.addColorStop(1, 'rgba(255,255,255,.2)');
+          ctx.strokeStyle = grad;
+          ctx.lineWidth = ((fx.width || 4) - 3 * p) * dpr;
+          ctx.shadowColor = `rgba(${col},.9)`;
+          ctx.shadowBlur = 12 * dpr;
+          ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(cx, cy); ctx.stroke();
+        }
+      }
       ctx.restore();
     }
   }
@@ -359,29 +412,66 @@
     if (!fireCtl.canFire(now)) return;
     if (isMyDead(now)) return;
     fireCtl.fire(now);
-    sfx.shot();
-    navigator.vibrate?.(20);   // 每發輕微震動（iOS Safari 不支援，Android 有效）
-    effects.push({ t0: now, dur: 90 });
+    const w = myWeapon();
+    const fxSpec = WEAPON_FX[w.id] || WEAPON_FX.pistol;
+    sfx.shot(w.id);
+    navigator.vibrate?.(w.id === 'rocket' || w.id === 'sniper' ? 55 : 20);
     flashClass($('muzzleFlash'), 'show');
     flashClass($('gunOverlay'), 'recoil');
     flashClass($('gameScreen'), 'shake');
 
+    // 射擊視覺效果（依武器）
+    if (fxSpec.type === 'pellets') {
+      effects.push({ type: 'pellets', t0: now, dur: fxSpec.dur, color: fxSpec.color,
+        spreadPx: fxSpec.spread,
+        angles: Array.from({ length: fxSpec.pellets }, () => (Math.random() * 2 - 1) * Math.PI) });
+    } else if (fxSpec.type === 'rocket') {
+      effects.push({ type: 'rocket', t0: now, dur: fxSpec.travelMs, color: fxSpec.color });
+    } else {
+      effects.push({ type: fxSpec.type, t0: now, dur: fxSpec.dur, width: fxSpec.width, color: fxSpec.color });
+    }
+
     const t = coverTransform();
     const aim = screenCenterToVideo(t);
 
-    // 找被打中的目標：十字標中心點落在剪影內即命中（最靠近中心者優先）
+    if (fxSpec.type === 'rocket') {
+      // 火箭：彈頭飛行後才在準星處爆炸結算（爆風有容錯半徑）
+      setTimeout(() => {
+        if (!running) return;
+        const tNow = performance.now();
+        sfx.explosion();
+        navigator.vibrate?.(120);
+        flashClass($('gameScreen'), 'shake');
+        effects.push({ type: 'blast', t0: tNow, dur: fxSpec.blastDur, color: fxSpec.color,
+          radius: overlay.height * fxSpec.blastRadiusFrac * 2 });
+        resolveHit(aim, tNow, w, video.videoHeight * fxSpec.blastRadiusFrac);
+      }, fxSpec.travelMs);
+    } else {
+      resolveHit(aim, now, w, 0);
+    }
+  }
+
+  /** 命中結算：準星點落在剪影內即命中；blastR>0 時（火箭爆風）允許以圓周取樣容錯 */
+  function resolveHit(aim, now, w, blastR) {
+    const probes = [[aim.x, aim.y]];
+    if (blastR > 0) {
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2;
+        probes.push([aim.x + Math.cos(a) * blastR, aim.y + Math.sin(a) * blastR]);
+      }
+    }
     let best = null;
     for (const det of poses) {
       const info = targetInfo(det, now);
       if (!info?.registered || info.dead) continue;
-      if (!segHitTest(det, aim.x, aim.y)) continue;
+      if (!probes.some(([px, py]) => segHitTest(det, px, py))) continue;
       const b = det.bbox;
       const d = Math.hypot(aim.x - (b.minX + b.maxX) / 2, aim.y - (b.minY + b.maxY) / 2);
       if (!best || d < best.d) best = { det, d };
     }
     if (!best) return;
 
-    const dmg = myWeapon().body;   // 現行只判剪影內外，一律吃武器的軀幹傷害
+    const dmg = w.body;   // 現行只判剪影內外，一律吃武器的軀幹傷害
     if (mode === 'solo') {
       const result = registry.takeDamage(best.det.id, 'hit', now, dmg);
       if (!result) return;
@@ -464,8 +554,8 @@
   /** 依所選武器換槍圖；圖檔還沒就位時 fallback 回預設 gun.png */
   function updateGunImage() {
     const img = $('gunImg');
-    img.onerror = () => { img.onerror = null; img.src = 'assets/gun.png?v=36'; };
-    img.src = `assets/guns/${myWeaponId}.png?v=36`;
+    img.onerror = () => { img.onerror = null; img.src = 'assets/gun.png?v=37'; };
+    img.src = `assets/guns/${myWeaponId}.png?v=37`;
   }
 
   /* ── 連線事件 ── */

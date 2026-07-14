@@ -28,7 +28,19 @@ const WEAPONS = [
     note: '近身重擊：單發軀幹傷害僅次於狙擊，但爆頭加成最小。' },
   { id: 'sniper',  name: '狙擊槍', body: 70, head: 100, cooldownMs: 2500,
     note: '一發爆頭直接帶走、中身兩發，但 2.5 秒才能再開一槍。' },
+  { id: 'rocket',  name: '火箭筒', body: 90, head: 100, cooldownMs: 3500,
+    note: '一發近乎帶走且爆風有容錯範圍，但 3.5 秒一發、彈頭有飛行時間。' },
 ];
+
+/** 各武器的射擊特效參數（曳光/散彈扇/光束/火箭），main.js drawEffects 依此繪製 */
+const WEAPON_FX = {
+  pistol:  { type: 'tracer',  dur: 90,  width: 4,   color: '255,210,90' },
+  rifle:   { type: 'tracer',  dur: 110, width: 5,   color: '255,180,60' },
+  smg:     { type: 'tracer',  dur: 70,  width: 3,   color: '255,230,120' },
+  shotgun: { type: 'pellets', dur: 140, pellets: 7, spread: 0.10, color: '255,190,80' },
+  sniper:  { type: 'beam',    dur: 240, width: 3,   color: '160,220,255' },
+  rocket:  { type: 'rocket',  travelMs: 260, blastDur: 320, blastRadiusFrac: 0.07, color: '255,140,50' },
+};
 const DEFAULT_WEAPON_ID = 'pistol';
 
 /** 以 id 取武器；未知 id（含舊版沒送）回傳 null */
@@ -168,16 +180,55 @@ class Sfx {
     if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     if (this.ctx.state === 'suspended') this.ctx.resume();
   }
-  /** 槍聲：短促噪音爆 */
-  shot() {
+  /** 槍聲：各武器參數化合成（噪音爆 + 低通塑形；重槍加低頻 thump、火箭是發射 whoosh） */
+  shot(weaponId) {
+    this.ensure();
+    const P = {
+      pistol:  { dur: 0.12, gain: 0.50, lp: 8000, decay: 2.5 },
+      rifle:   { dur: 0.16, gain: 0.60, lp: 6000, decay: 2.2, thump: 120 },
+      smg:     { dur: 0.07, gain: 0.35, lp: 9500, decay: 3.0 },
+      shotgun: { dur: 0.30, gain: 0.85, lp: 2600, decay: 1.8, thump: 90 },
+      sniper:  { dur: 0.28, gain: 0.80, lp: 5200, decay: 2.0, thump: 70 },
+      rocket:  { dur: 0.35, gain: 0.60, lp: 1400, decay: 1.2, whoosh: true },
+    }[weaponId] || { dur: 0.12, gain: 0.5, lp: 8000, decay: 2.5 };
+    const ctx = this.ctx, t = ctx.currentTime;
+    const buf = ctx.createBuffer(1, Math.max(1, ctx.sampleRate * P.dur), ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, P.decay);
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass';
+    f.frequency.setValueAtTime(P.lp, t);
+    if (P.whoosh) f.frequency.exponentialRampToValueAtTime(4000, t + P.dur);  // 發射尾音上揚
+    const g = ctx.createGain(); g.gain.setValueAtTime(P.gain, t);
+    src.connect(f).connect(g).connect(ctx.destination); src.start(t);
+    if (P.thump) {   // 重槍低頻 thump
+      const o = ctx.createOscillator(), og = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(P.thump, t);
+      o.frequency.exponentialRampToValueAtTime(40, t + 0.18);
+      og.gain.setValueAtTime(0.5, t);
+      og.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+      o.connect(og).connect(ctx.destination); o.start(t); o.stop(t + 0.22);
+    }
+  }
+  /** 火箭爆炸：低頻悶爆 + 下墜音 */
+  explosion() {
     this.ensure();
     const ctx = this.ctx, t = ctx.currentTime;
-    const len = 0.12, buf = ctx.createBuffer(1, ctx.sampleRate * len, ctx.sampleRate);
+    const len = 0.55, buf = ctx.createBuffer(1, ctx.sampleRate * len, ctx.sampleRate);
     const d = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 2.5);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 1.6);
     const src = ctx.createBufferSource(); src.buffer = buf;
-    const g = ctx.createGain(); g.gain.setValueAtTime(0.5, t);
-    src.connect(g).connect(ctx.destination); src.start(t);
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(900, t);
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.9, t);
+    src.connect(f).connect(g).connect(ctx.destination); src.start(t);
+    const o = ctx.createOscillator(), og = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(130, t);
+    o.frequency.exponentialRampToValueAtTime(35, t + 0.4);
+    og.gain.setValueAtTime(0.6, t);
+    og.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+    o.connect(og).connect(ctx.destination); o.start(t); o.stop(t + 0.5);
   }
   /** 命中：短 ding；爆頭音調更高 */
   hit(headshot) {
