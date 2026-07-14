@@ -12,13 +12,23 @@
  * }>
  */
 
-// 自動選最佳組合（依實測數據）：
-//   WebGPU(新機)＝被開銷卡住，降解析度換不到速度 → 用 256 拿最佳品質
+// 自動選最佳組合：
+//   WebGPU(新機)＝192 換 FPS（比 256 少 44% 運算，r8 模型品質扛得住；?hq 可回 256）
 //   WASM(舊機)＝被運算量卡住，降解析度大幅加速 → 用 128 保流暢
-const SEG_HIRES = { model: 'models/seg_r8_256.onnx', size: 256 };
+const _hq = typeof location !== 'undefined' && new URLSearchParams(location.search).has('hq');
+const SEG_HIRES = _hq
+  ? { model: 'models/seg_r8_256.onnx', size: 256 }
+  : { model: 'models/seg_r8_192.onnx', size: 192 };
 const SEG_LORES = { model: 'models/seg_r8_128.onnx', size: 128 };
-// CONF 0.35→乾淨偵測不誤判背景；NMS 0.5→合併同人重複框但保留不同人；MASK_TH 低→剪影略大於人（寧可略大不可小於人）
-const SEG_CONF = 0.35, SEG_NMS_IOU = 0.5, SEG_MASK_TH = 0.4;
+// 信心門檻改「準星中央加權」：中央（瞄準區）0.18 放寬確保人都被標到，邊緣 0.30 防背景誤判；
+// NMS 0.6→重疊的多位玩家不互吃；MASK_TH 低→剪影略大於人（寧可略大不可小於人）
+const SEG_CONF_CENTER = 0.18, SEG_CONF_EDGE = 0.30, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.4;
+/** 依候選框中心離畫面中心的距離回傳門檻（letterbox 座標，S=輸入邊長） */
+function segConfTh(cx, cy, S) {
+  const d = Math.hypot(cx - S / 2, cy - S / 2) / (S / 2);   // 0=正中 1=邊
+  const t = Math.min(1, Math.max(0, (d - 0.3) / 0.7));      // 中央 30% 全放寬
+  return SEG_CONF_CENTER + (SEG_CONF_EDGE - SEG_CONF_CENTER) * t;
+}
 
 function _sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
 
@@ -91,8 +101,9 @@ async function createSegDetector(onStatus) {
       const dets = [];
       for (let i = 0; i < N; i++) {
         const score = A[4 * N + i];
-        if (score < SEG_CONF) continue;
+        if (score < SEG_CONF_CENTER) continue;
         const cx = A[i], cy = A[N + i], w = A[2 * N + i], h = A[3 * N + i];
+        if (score < segConfTh(cx, cy, SEG_SIZE)) continue;
         const coeffs = new Float32Array(32);
         for (let k = 0; k < 32; k++) coeffs[k] = A[(5 + k) * N + i];
         dets.push({ score, ix1: cx - w / 2, iy1: cy - h / 2, ix2: cx + w / 2, iy2: cy + h / 2, coeffs });
@@ -185,7 +196,7 @@ function segWorkerSupported() {
 
 async function createSegDetectorWorker(onStatus) {
   onStatus('啟動背景執行緒…');
-  const worker = new Worker('js/seg-worker.js?v=29');
+  const worker = new Worker('js/seg-worker.js?v=34');
   const abs = m => new URL(m, location.href).href;
   const assignIds = _makeTracker();
   // 方法 C：GPU 後處理，?noc 可關閉做 A/B 對照

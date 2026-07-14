@@ -14,7 +14,13 @@ importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webg
 // 本站 /js/ 下而 404 → 明確指回 CDN
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/';
 
-const SEG_CONF = 0.35, SEG_NMS_IOU = 0.5, SEG_MASK_TH = 0.4;
+// 信心門檻「準星中央加權」：中央（瞄準區）放寬確保人都被標到，邊緣較嚴防背景誤判；NMS 0.6 重疊玩家不互吃
+const SEG_CONF_CENTER = 0.18, SEG_CONF_EDGE = 0.30, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.4;
+function segConfTh(cx, cy, S) {
+  const d = Math.hypot(cx - S / 2, cy - S / 2) / (S / 2);
+  const t = Math.min(1, Math.max(0, (d - 0.3) / 0.7));
+  return SEG_CONF_CENTER + (SEG_CONF_EDGE - SEG_CONF_CENTER) * t;
+}
 // sigmoid(v) >= TH ⇔ v >= logit(TH)，shader 直接比 v 省一次 exp
 const SEG_MASK_LOGIT = Math.log(SEG_MASK_TH / (1 - SEG_MASK_TH));
 const MAXD = 8; // GPU 遮罩批次上限（單畫面人數不會超過）
@@ -184,8 +190,9 @@ async function runDetect(bitmap, vw, vh) {
   const cand = [];
   for (let i = 0; i < N; i++) {
     const score = A[4 * N + i];
-    if (score < SEG_CONF) continue;
+    if (score < SEG_CONF_CENTER) continue;
     const cx = A[i], cy = A[N+i], w = A[2*N+i], h = A[3*N+i];
+    if (score < segConfTh(cx, cy, SEG_SIZE)) continue;
     const coeffs = new Float32Array(32);
     for (let k = 0; k < 32; k++) coeffs[k] = A[(5+k)*N + i];
     cand.push({ score, ix1: cx-w/2, iy1: cy-h/2, ix2: cx+w/2, iy2: cy+h/2, coeffs });
