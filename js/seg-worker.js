@@ -14,8 +14,8 @@ importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webg
 // 本站 /js/ 下而 404 → 明確指回 CDN
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/';
 
-// 信心門檻「準星中央加權」：中央（瞄準區）放寬確保人都被標到，邊緣較嚴防背景誤判；NMS 0.6 重疊玩家不互吃
-const SEG_CONF_CENTER = 0.18, SEG_CONF_EDGE = 0.30, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.4;
+// 信心門檻「準星中央加權」：中央 0.25、邊緣 0.35（0.18/0.30 誤判偏高已回收）；NMS 0.6 重疊玩家不互吃；MASK_TH 0.5 剪影貼身
+const SEG_CONF_CENTER = 0.25, SEG_CONF_EDGE = 0.35, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.5;
 function segConfTh(cx, cy, S) {
   const d = Math.hypot(cx - S / 2, cy - S / 2) / (S / 2);
   const t = Math.min(1, Math.max(0, (d - 0.3) / 0.7));
@@ -248,13 +248,8 @@ async function runDetect(bitmap, vw, vh) {
         }
       }
     }
-    const mask = new Uint8Array(mh * mw);
-    for (let my=0; my<mh; my++) for (let mx=0; mx<mw; mx++) {
-      if (!raw[my*mw+mx]) continue;
-      mask[my*mw+mx]=1;
-      if (mx>0) mask[my*mw+mx-1]=1; if (mx<mw-1) mask[my*mw+mx+1]=1;
-      if (my>0) mask[(my-1)*mw+mx]=1; if (my<mh-1) mask[(my+1)*mw+mx]=1;
-    }
+    // 不再膨脹：剪影貼身剛剛好（使用者要求）
+    const mask = raw;
     dets.push({
       score: dd.score,
       bbox: { minX: Math.max(0,i2vX(dd.ix1)), minY: Math.max(0,i2vY(dd.iy1)), maxX: Math.min(vw,i2vX(dd.ix2)), maxY: Math.min(vh,i2vY(dd.iy2)) },

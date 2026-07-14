@@ -20,9 +20,9 @@ const SEG_HIRES = _hq
   ? { model: 'models/seg_r8_256.onnx', size: 256 }
   : { model: 'models/seg_r8_192.onnx', size: 192 };
 const SEG_LORES = { model: 'models/seg_r8_128.onnx', size: 128 };
-// 信心門檻改「準星中央加權」：中央（瞄準區）0.18 放寬確保人都被標到，邊緣 0.30 防背景誤判；
-// NMS 0.6→重疊的多位玩家不互吃；MASK_TH 低→剪影略大於人（寧可略大不可小於人）
-const SEG_CONF_CENTER = 0.18, SEG_CONF_EDGE = 0.30, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.4;
+// 信心門檻「準星中央加權」：中央（瞄準區）0.25、邊緣 0.35（v34 的 0.18/0.30 誤判偏高，往回收）；
+// NMS 0.6→重疊的多位玩家不互吃；MASK_TH 0.5→剪影貼身剛剛好（v35 前刻意放大，使用者要求改貼身）
+const SEG_CONF_CENTER = 0.25, SEG_CONF_EDGE = 0.35, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.5;
 /** 依候選框中心離畫面中心的距離回傳門檻（letterbox 座標，S=輸入邊長） */
 function segConfTh(cx, cy, S) {
   const d = Math.hypot(cx - S / 2, cy - S / 2) / (S / 2);   // 0=正中 1=邊
@@ -139,18 +139,8 @@ async function createSegDetector(onStatus) {
             if (_sigmoid(v) >= SEG_MASK_TH) raw[my * mw + mx] = 1;
           }
         }
-        // 膨脹 1 格：剪影略大於人、保證不小於人（寧可略大不可小）
-        const mask = new Uint8Array(mh * mw);
-        for (let my = 0; my < mh; my++) {
-          for (let mx = 0; mx < mw; mx++) {
-            if (!raw[my * mw + mx]) continue;
-            mask[my * mw + mx] = 1;
-            if (mx > 0) mask[my * mw + mx - 1] = 1;
-            if (mx < mw - 1) mask[my * mw + mx + 1] = 1;
-            if (my > 0) mask[(my - 1) * mw + mx] = 1;
-            if (my < mh - 1) mask[(my + 1) * mw + mx] = 1;
-          }
-        }
+        // 不再膨脹：剪影貼身剛剛好（使用者要求）
+        const mask = raw;
         return {
           score: dd.score,
           bbox: {
@@ -196,7 +186,7 @@ function segWorkerSupported() {
 
 async function createSegDetectorWorker(onStatus) {
   onStatus('啟動背景執行緒…');
-  const worker = new Worker('js/seg-worker.js?v=34');
+  const worker = new Worker('js/seg-worker.js?v=36');
   const abs = m => new URL(m, location.href).href;
   const assignIds = _makeTracker();
   // 方法 C：GPU 後處理，?noc 可關閉做 A/B 對照
