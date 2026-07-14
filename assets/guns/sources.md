@@ -23,6 +23,22 @@
 | shotgun.png | Shotgun_1 | 泵動式散彈槍（雙管膛+擊錘） | 520×362 |
 | sniper.png | SniperRifle_1 | 栓式狙擊槍（大型瞄準鏡+槍機拉柄） | 520×328 |
 
+## 第四輪補充（2026-07-14）：rocket.png
+
+Ultimate Gun Pack 內無火箭筒/榴彈發射器類模型（已逐檔清查），改用同作者（Quaternius）另一 CC0 模型，走同一 blender-mcp 渲染管線，低多邊形平塗風格一致。
+
+- **模型**：Rocket Launcher（.glb，紅/灰/黑平塗，管口有雙火箭彈頭、尾部排焰喇叭口）
+- **作者**：Quaternius（quaternius.com）
+- **授權**：**CC0**（Creative Commons Zero 1.0，免署名，仍記錄作者備查）
+- **下載頁**：https://poly.pizza/m/GCqUvqleqN
+- **原始檔**：https://static.poly.pizza/4b445cbf-38b6-43f3-afd6-32d88e8f074b.glb
+- **下載日期**：2026-07-14
+- **原始檔存放**：`assets/guns_raw/quaternius_polypizza/RocketLauncher_Quaternius.glb`
+
+| 輸出檔 | 使用模型 | 內容 | 尺寸 |
+|---|---|---|---|
+| rocket.png | Rocket Launcher（poly.pizza `GCqUvqleqN`） | 火箭筒 FPS 視角：尾部排焰喇叭口在右下近處朝觀者、砲口（紅色火箭彈尖）指向左上遠方，砲口尖端置中對齊圖頂 | 520×363 |
+
 ## 渲染管線（2026-07-14，本機 Blender 4.2 + blender-mcp）
 
 1. 從 .blend append 模型（保留原始平塗材質；槍口朝 +X）。
@@ -37,6 +53,7 @@
 | 檔案 | 授權 | 是否需署名 |
 |---|---|---|
 | pistol.png / rifle.png / smg.png / shotgun.png / sniper.png | CC0（Quaternius Ultimate Gun Pack 之自製渲染） | 否 |
+| rocket.png | CC0（Quaternius「Rocket Launcher」poly.pizza 模型之自製渲染） | 否 |
 
 ## 歷史紀錄（備查，均已棄用）
 
