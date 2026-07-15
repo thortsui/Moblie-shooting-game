@@ -18,18 +18,18 @@ const RULES = {
     body=剪影命中傷害（現行只判剪影內外，一律吃 body）；
     head 保留給未來部位判定用；cooldownMs=每發冷卻。 */
 const WEAPONS = [
-  { id: 'pistol',  name: '手槍',   body: 25, head: 50,  cooldownMs: 1000,
-    note: '預設均衡槍：四槍中身、兩槍爆頭，1 秒一發穩定好上手。' },
-  { id: 'rifle',   name: '步槍',   body: 34, head: 68,  cooldownMs: 1200,
-    note: '沉穩主力：三槍中身即倒（2.4 秒），但爆頭對決略慢於手槍。' },
-  { id: 'smg',     name: '衝鋒槍', body: 12, head: 20,  cooldownMs: 450,
+  { id: 'pistol',  name: '手槍',   body: 25, head: 50,  cooldownMs: 700,
+    note: '預設均衡槍：四槍中身、兩槍爆頭，0.7 秒一發穩定好上手。' },
+  { id: 'rifle',   name: '步槍',   body: 34, head: 68,  cooldownMs: 850,
+    note: '沉穩主力：三槍中身即倒（1.7 秒），節奏沉穩火力足。' },
+  { id: 'smg',     name: '衝鋒槍', body: 12, head: 20,  cooldownMs: 320,
     note: '潑水流：射速最快、單發最輕，打不太準也能靠連發補回來。' },
-  { id: 'shotgun', name: '散彈槍', body: 40, head: 60,  cooldownMs: 1500,
+  { id: 'shotgun', name: '散彈槍', body: 40, head: 60,  cooldownMs: 1050,
     note: '近身重擊：單發軀幹傷害僅次於狙擊，但爆頭加成最小。' },
-  { id: 'sniper',  name: '狙擊槍', body: 70, head: 100, cooldownMs: 2500,
-    note: '一發爆頭直接帶走、中身兩發，但 2.5 秒才能再開一槍。' },
-  { id: 'rocket',  name: '火箭筒', body: 90, head: 100, cooldownMs: 3500,
-    note: '一發近乎帶走且爆風有容錯範圍，但 3.5 秒一發、彈頭有飛行時間。' },
+  { id: 'sniper',  name: '狙擊槍', body: 70, head: 100, cooldownMs: 1750,
+    note: '一發爆頭直接帶走、中身兩發，1.75 秒一發。' },
+  { id: 'rocket',  name: '火箭筒', body: 90, head: 100, cooldownMs: 2450,
+    note: '一發近乎帶走且爆風有容錯範圍，2.45 秒一發、彈頭有飛行時間。' },
 ];
 
 /** 各武器的射擊特效參數（曳光/散彈扇/光束/火箭），main.js drawEffects 依此繪製 */
