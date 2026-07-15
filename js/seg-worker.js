@@ -14,8 +14,8 @@ importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webg
 // 本站 /js/ 下而 404 → 明確指回 CDN
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/';
 
-// 信心門檻「準星中央加權」：中央 0.25、邊緣 0.35（0.18/0.30 誤判偏高已回收）；NMS 0.6 重疊玩家不互吃；MASK_TH 0.5 剪影貼身
-const SEG_CONF_CENTER = 0.25, SEG_CONF_EDGE = 0.35, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.5;
+// 信心門檻「準星中央加權」：中央 0.45、邊緣 0.55（正確率優先，門檻拉到上限、只認高把握目標最大化不誤判；歷程 0.18/0.30→0.25/0.35→0.30/0.40→0.45/0.55）；NMS 0.6 重疊玩家不互吃；MASK_TH 0.5 剪影貼身
+const SEG_CONF_CENTER = 0.45, SEG_CONF_EDGE = 0.55, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.5;
 function segConfTh(cx, cy, S) {
   const d = Math.hypot(cx - S / 2, cy - S / 2) / (S / 2);
   const t = Math.min(1, Math.max(0, (d - 0.3) / 0.7));
@@ -64,6 +64,31 @@ onmessage = async (e) => {
     } catch (err) {
       // 兩種後端都失敗：明確回報，讓主線程退回主線程偵測器（不再無聲卡死）
       postMessage({ type: 'init-error', error: String(err) });
+    }
+    return;
+  }
+  if (msg.type === 'setModel') {
+    // 執行中切換偵測解析度（256↔192 保底降級）；重建 session + 前處理畫布
+    try {
+      const wantC = gpuPost && backend === 'webgpu';
+      let ns;
+      try {
+        ns = await ort.InferenceSession.create(msg.model, {
+          executionProviders: [backend],
+          ...(wantC ? { preferredOutputLocation: 'gpu-buffer' } : {}),
+        });
+      } catch (err) {
+        ns = await ort.InferenceSession.create(msg.model, { executionProviders: [backend] });
+      }
+      const prev = sess;
+      sess = ns; SEG_SIZE = msg.size; inName = sess.inputNames[0];
+      cvs = new OffscreenCanvas(SEG_SIZE, SEG_SIZE);
+      cctx = cvs.getContext('2d', { willReadFrequently: true });
+      prev?.release?.();
+      postMessage({ type: 'model-ready', size: SEG_SIZE });
+    } catch (err) {
+      // 切換失敗：維持原 session 繼續跑，回報錯誤
+      postMessage({ type: 'model-ready', size: SEG_SIZE, error: String(err) });
     }
     return;
   }

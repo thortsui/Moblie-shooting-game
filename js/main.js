@@ -68,7 +68,7 @@
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error('此瀏覽器不支援相機。若你是從 LINE / FB / IG 的訊息點開連結，請改用「以瀏覽器開啟」或複製網址到 Safari / Chrome');
     }
-    // 強化畫質：優先 2K 高解析度（清晰、利於顏色/特徵辨識），偵測仍縮到 192 不影響速度；失敗逐層降級
+    // 強化畫質：優先 2K 高解析度（清晰、利於顏色/特徵辨識），偵測會 letterbox 縮到模型輸入（WebGPU 256／WASM 128）；失敗逐層降級
     const UHD = { width: { ideal: 2560 }, height: { ideal: 1440 }, frameRate: { ideal: 60 } };
     const HI = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } };
     const candidates = [
@@ -129,10 +129,12 @@
   }
   window.addEventListener('resize', resizeOverlay);
 
-  /* ── 偵測迴圈（方法A：節流到最多 ~12fps，保底 ≥10、把主線程讓給畫面）── */
-  const DET_MIN_INTERVAL = new URLSearchParams(location.search).has('max') ? 0 : 83;   // ?max=1 拿掉節流量最高fps
+  /* ── 偵測迴圈（節流上限 ~18fps；偵測在背景執行緒，準星/畫面獨立跑滿幀）── */
+  const DET_MIN_INTERVAL = new URLSearchParams(location.search).has('max') ? 0 : 55;   // 55ms≈18fps 上限（保底 ≥15）；?max=1 全速
   const DET_PERSIST_MS = 600;   // 單幀漏抓時沿用舊遮罩的時限（開火不因偵測斷幀落空）
   let fpsCount = 0, fpsLast = performance.now(), detErrors = 0;
+  // 保底 15fps：WebGPU 背景執行緒跑 256 時，若連續量測撐不到 15fps 就自動降到 192
+  let lowFpsSecs = 0, resDowngraded = false;
   async function detectLoop() {
     while (running) {
       const tStart = performance.now();
@@ -204,7 +206,20 @@
       fpsCount++;
       const now = performance.now();
       if (now - fpsLast >= 1000) {
-        $('fpsText').textContent = `${fpsCount}/${renderFps}`;   // 偵測/畫面
+        const detFps = fpsCount;
+        $('fpsText').textContent = `${detFps}/${renderFps}`;   // 偵測/畫面
+        // 保底 15fps：256 撐不住就自動降 192（偵測在背景執行緒，切換不影響準星/畫面）
+        if (!resDowngraded && detector?.worker && detector.size === 256) {
+          if (detFps < 15) {
+            if (++lowFpsSecs >= 2) {
+              resDowngraded = true;
+              console.log('[detect] 偵測 fps 連續 <15，256→192 保底降級');
+              detector.setResolution?.().catch(() => { resDowngraded = false; });
+            }
+          } else {
+            lowFpsSecs = 0;
+          }
+        }
         fpsCount = 0; fpsLast = now;
       }
       // 節流：偵測快時補足間隔到 ~83ms(12fps 上限)，把剩餘時間讓給畫面繪製；偵測慢時全速跑
@@ -587,8 +602,8 @@
   /** 依所選武器換槍圖；圖檔還沒就位時 fallback 回預設 gun.png */
   function updateGunImage() {
     const img = $('gunImg');
-    img.onerror = () => { img.onerror = null; img.src = 'assets/gun.png?v=40'; };
-    img.src = `assets/guns/${myWeaponId}.png?v=40`;
+    img.onerror = () => { img.onerror = null; img.src = 'assets/gun.png?v=41'; };
+    img.src = `assets/guns/${myWeaponId}.png?v=41`;
   }
 
   /* ── 連線事件 ── */

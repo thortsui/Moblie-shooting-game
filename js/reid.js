@@ -7,7 +7,7 @@
  */
 
 async function createReidEmbedder() {
-  const MODEL = 'models/reid_v2.onnx?v=40';
+  const MODEL = 'models/reid_v2.onnx?v=41';
   let sess = null, backend = 'webgpu';
   try {
     sess = await ort.InferenceSession.create(MODEL, { executionProviders: ['webgpu'] });

@@ -12,17 +12,27 @@
  * }>
  */
 
-// 自動選最佳組合：
-//   WebGPU(新機)＝192 換 FPS（比 256 少 44% 運算，r8 模型品質扛得住；?hq 可回 256）
-//   WASM(舊機)＝被運算量卡住，降解析度大幅加速 → 用 128 保流暢
-const _hq = typeof location !== 'undefined' && new URLSearchParams(location.search).has('hq');
-const SEG_HIRES = _hq
-  ? { model: 'models/seg_r9_256.onnx', size: 256 }
-  : { model: 'models/seg_r9_192.onnx', size: 192 };
+// 解析度策略（正確率 vs 幀率；使用者：正確率優先、但偵測 fps 保底 15）：
+//   WebGPU（iPhone 14/A15 以上等級）＝256：正確率高、誤判低。推論在背景執行緒（seg-worker），
+//     不佔主線程 → 準星/瞄準框顯示不被偵測（yolo）拖累。若實測偵測 fps 撐不到 15，
+//     main.js 的 detectLoop 會呼叫 downgrade() 自動切回 192 保底流暢（見下方 worker 包裝）。
+//   主線程退回路徑（瀏覽器不支援 Worker/OffscreenCanvas 時）＝192：避免 256 在主線程卡住準星。
+//   WASM（舊機）＝128：被運算量卡住，只能靠降解析度保流暢。
+//   ?hq 強制 256、?fast 強制 192（效能對照用）。
+const _qs = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
+const SEG_256 = { model: 'models/seg_r9_256.onnx', size: 256 };
+const SEG_192 = { model: 'models/seg_r9_192.onnx', size: 192 };
 const SEG_LORES = { model: 'models/seg_r9_128.onnx', size: 128 };
-// 信心門檻「準星中央加權」：中央（瞄準區）0.25、邊緣 0.35（v34 的 0.18/0.30 誤判偏高，往回收）；
+// Worker（WebGPU 背景執行緒）預設 256；主線程 WebGPU 退回預設 192
+const SEG_WORKER_HIRES = _qs.has('fast') ? SEG_192 : SEG_256;
+const SEG_MAIN_HIRES = _qs.has('hq') ? SEG_256 : SEG_192;
+// 256 撐不到 15fps 時的保底降級目標
+const SEG_FALLBACK = SEG_192;
+// 舊變數名相容（若他處引用）
+const SEG_HIRES = SEG_WORKER_HIRES;
+// 信心門檻「準星中央加權」：中央（瞄準區）0.45、邊緣 0.55（正確率優先，門檻拉到上限、只認高把握目標最大化不誤判；歷程 0.18/0.30→0.25/0.35→0.30/0.40→0.45/0.55）；
 // NMS 0.6→重疊的多位玩家不互吃；MASK_TH 0.5→剪影貼身剛剛好（v35 前刻意放大，使用者要求改貼身）
-const SEG_CONF_CENTER = 0.25, SEG_CONF_EDGE = 0.35, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.5;
+const SEG_CONF_CENTER = 0.45, SEG_CONF_EDGE = 0.55, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.5;
 /** 依候選框中心離畫面中心的距離回傳門檻（letterbox 座標，S=輸入邊長） */
 function segConfTh(cx, cy, S) {
   const d = Math.hypot(cx - S / 2, cy - S / 2) / (S / 2);   // 0=正中 1=邊
@@ -35,9 +45,9 @@ function _sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
 async function createSegDetector(onStatus) {
   onStatus('載入 onnxruntime…');
   // onnxruntime-web 由 index.html 以 <script> 載入，全域 ort 可用
-  let backend = 'webgpu', sess = null, cfg = SEG_HIRES;
+  let backend = 'webgpu', sess = null, cfg = SEG_MAIN_HIRES;   // 主線程路徑用 192，避免 256 卡住準星
   try {
-    sess = await ort.InferenceSession.create(SEG_HIRES.model, { executionProviders: ['webgpu'] });
+    sess = await ort.InferenceSession.create(SEG_MAIN_HIRES.model, { executionProviders: ['webgpu'] });
   } catch (e) {
     backend = 'wasm'; cfg = SEG_LORES;
     onStatus('WebGPU 不可用，改用 WASM 流暢版…');
@@ -186,7 +196,7 @@ function segWorkerSupported() {
 
 async function createSegDetectorWorker(onStatus) {
   onStatus('啟動背景執行緒…');
-  const worker = new Worker('js/seg-worker.js?v=36');
+  const worker = new Worker('js/seg-worker.js?v=41');
   const abs = m => new URL(m, location.href).href;
   const assignIds = _makeTracker();
   // 方法 C：GPU 後處理，?noc 可關閉做 A/B 對照
@@ -201,7 +211,7 @@ async function createSegDetectorWorker(onStatus) {
     worker.onerror = e => { clearTimeout(to); reject(new Error('worker error: ' + e.message)); };
     worker.postMessage({
       type: 'init',
-      hires: { model: abs(SEG_HIRES.model), size: SEG_HIRES.size },
+      hires: { model: abs(SEG_WORKER_HIRES.model), size: SEG_WORKER_HIRES.size },
       lores: { model: abs(SEG_LORES.model), size: SEG_LORES.size },
       threads: Math.min(4, navigator.hardwareConcurrency || 4),
       gpuPost,
@@ -209,19 +219,35 @@ async function createSegDetectorWorker(onStatus) {
   });
   onStatus(`背景執行緒就緒（${ready.size}${ready.gpuPost ? '·C' : ''}）`);
 
+  let curSize = ready.size;
   let reqId = 0;
   const pending = new Map();
+  let switchResolve = null;
   worker.onmessage = e => {
     if (e.data.type === 'result') {
       if (e.data.prof) window.__segProf = e.data.prof;
       const p = pending.get(e.data.reqId);
       if (p) { pending.delete(e.data.reqId); p(e.data.dets); }
+    } else if (e.data.type === 'model-ready') {
+      if (!e.data.error) curSize = e.data.size;
+      const r = switchResolve; switchResolve = null;
+      r?.(e.data);
     }
   };
 
   return {
     backend: ready.backend,
     worker: true,
+    get size() { return curSize; },
+    /** 執行中切換偵測解析度（保底降級用）。cfg 省略時切到 SEG_FALLBACK(192)。回傳 Promise。 */
+    setResolution(cfg) {
+      const c = cfg || SEG_FALLBACK;
+      if (c.size === curSize) return Promise.resolve({ size: curSize });
+      return new Promise(res => {
+        switchResolve = res;
+        worker.postMessage({ type: 'setModel', model: abs(c.model), size: c.size });
+      });
+    },
     async detect(video) {
       const vw = video.videoWidth, vh = video.videoHeight;
       if (!vw) return [];
