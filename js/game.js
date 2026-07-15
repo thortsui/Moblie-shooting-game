@@ -166,7 +166,14 @@ class FireControl {
     this.cooldownMs = cooldownMs;
   }
   canFire(now) { return now - this.lastFire >= this.cooldownMs; }
-  fire(now) { this.lastFire = now; }
+  fire(now) {
+    // 射速補償：連發時以「理論到期時間」(lastFire+cooldown) 當新基準，而非 reset 到 now。
+    // 實際開火總比理論到期晚一個 render 幀（畫面越卡延遲越大），若每發都以 now 為基準，
+    // 這段延遲會逐發累積 → 實際射速比武器標示慢約 0.1 秒。用理論時間當基準可讓平均射速精準貼齊標示。
+    // 只有停火較久（隔超過一個冷卻）才改用 now，避免補償歷史造成一次爆發連射。
+    const ideal = this.lastFire + this.cooldownMs;
+    this.lastFire = (now - ideal <= this.cooldownMs) ? ideal : now;
+  }
   /** 冷卻進度 0(剛開完槍)~1(可再開火) */
   progress(now) {
     return Math.min(1, (now - this.lastFire) / this.cooldownMs);
