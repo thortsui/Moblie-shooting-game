@@ -30,6 +30,7 @@
 
   let detector = null, detectorPromise = null;
   let poses = [];
+  const trackMotion = new Map();   // 追蹤補間：目標 id -> {cx,cy,t,vx,vy}（video 座標 px/ms）
   let mirrored = false;
   let running = false;
 
@@ -197,6 +198,21 @@
         // 開火命中判定永遠有「最近可用」的剪影可打，不因單幀漏抓而落空。
         const tNow = performance.now();
         for (const det of result) det._seen = tNow;
+        // 追蹤補間：算每個目標的移動速度（video 座標 px/ms），render 幀間外推讓剪影/血條/命中貼合移動的人
+        for (const det of result) {
+          const b = det.bbox;
+          const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2;
+          const m = trackMotion.get(det.id);
+          if (m && tNow - m.t > 0 && tNow - m.t < 200) {
+            const dt = tNow - m.t;
+            const nvx = (cx - m.cx) / dt, nvy = (cy - m.cy) / dt;
+            det._vx = m.vx * 0.5 + nvx * 0.5;   // EMA 平滑，避免單幀抖動
+            det._vy = m.vy * 0.5 + nvy * 0.5;
+          } else { det._vx = 0; det._vy = 0; }   // 首次見到或斷太久 → 不外推
+          det._t0 = tNow;
+          trackMotion.set(det.id, { cx, cy, t: tNow, vx: det._vx, vy: det._vy });
+        }
+        if (trackMotion.size > 32) { for (const [k, v] of trackMotion) if (tNow - v.t > 2000) trackMotion.delete(k); }
         const freshIds = new Set(result.map(d => d.id));
         for (const old of poses) {
           if (freshIds.has(old.id)) continue;
@@ -238,7 +254,13 @@
     const t = coverTransform();
     ctx.clearRect(0, 0, overlay.width, overlay.height);
 
-    for (const pose of poses) drawTarget(pose, t, now);
+    for (const pose of poses) {
+      // 補間位移：自這批偵測起經過的時間 × 速度（clamp 120ms，斷幀時剪影不飄走）
+      const dt = Math.min(120, now - (pose._t0 || now));
+      pose._dx = (pose._vx || 0) * dt;
+      pose._dy = (pose._vy || 0) * dt;
+      drawTarget(pose, t, now);
+    }
     drawEffects(now);
     if (firing) tryFire();      // 按住連發：綁定畫面幀，與冷卻環同幀 → 環與實際一致、連發跟畫面一樣順（不被偵測 setTimeout 飢餓）
     updateFireRing(now);
@@ -288,7 +310,9 @@
     const fill = unreg ? [255,210,80,70] : dead ? [150,150,150,55] : PERSON_COLORS[info.pid % PERSON_COLORS.length];
     drawMask(pose, t, fill);
 
-    const topMid = toScreen((bounds.minX + bounds.maxX) / 2, bounds.minY, t);
+    // 血條跟著補間位移一起平移，與剪影對齊
+    const dx = pose._dx || 0, dy = pose._dy || 0;
+    const topMid = toScreen((bounds.minX + bounds.maxX) / 2 + dx, bounds.minY + dy, t);
     const barW = Math.max(70 * RDPR, (bounds.maxX - bounds.minX) * t.scale * 0.6);
     const barH = 10 * RDPR;
     const bx = topMid.x - barW / 2;
@@ -349,11 +373,11 @@
       mctx.putImageData(img, 0, 0);
       det._mcvKey = key;
     }
-    // proto→螢幕 為線性映射；計算整個遮罩網格貼到螢幕的位置與尺寸
+    // proto→螢幕 為線性映射；計算整個遮罩網格貼到螢幕的位置與尺寸（含追蹤補間位移 _dx/_dy）
     const cellW = t.scale / (tf.mxScale * tf.scale);
     const cellH = t.scale / (tf.myScale * tf.scale);
-    const originX = -tf.padX / tf.scale * t.scale + t.offX;
-    const originY = -tf.padY / tf.scale * t.scale + t.offY;
+    const originX = -tf.padX / tf.scale * t.scale + t.offX + (det._dx || 0) * t.scale;
+    const originY = -tf.padY / tf.scale * t.scale + t.offY + (det._dy || 0) * t.scale;
     ctx.save();
     if (mirrored) { ctx.translate(overlay.width, 0); ctx.scale(-1, 1); }
     ctx.imageSmoothingEnabled = true;
@@ -520,9 +544,11 @@
     for (const det of poses) {
       const info = targetInfo(det, now);
       if (!info?.registered || info.dead) continue;
-      if (!probes.some(([px, py]) => segHitTest(det, px, py))) continue;
+      // 命中與畫面一致：剪影視覺平移了 (_dx,_dy)，測試點反向平移回偵測時的 mask 座標
+      const dx = det._dx || 0, dy = det._dy || 0;
+      if (!probes.some(([px, py]) => segHitTest(det, px - dx, py - dy))) continue;
       const b = det.bbox;
-      const d = Math.hypot(aim.x - (b.minX + b.maxX) / 2, aim.y - (b.minY + b.maxY) / 2);
+      const d = Math.hypot(aim.x - ((b.minX + b.maxX) / 2 + dx), aim.y - ((b.minY + b.maxY) / 2 + dy));
       if (!best || d < best.d) best = { det, d };
     }
     if (!best) return;
