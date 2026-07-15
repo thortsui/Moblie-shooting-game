@@ -30,9 +30,9 @@ const SEG_MAIN_HIRES = _qs.has('hq') ? SEG_256 : SEG_192;
 const SEG_FALLBACK = SEG_192;
 // 舊變數名相容（若他處引用）
 const SEG_HIRES = SEG_WORKER_HIRES;
-// 信心門檻「準星中央加權」：中央（瞄準區）0.45、邊緣 0.55（正確率優先，門檻拉到上限、只認高把握目標最大化不誤判；歷程 0.18/0.30→0.25/0.35→0.30/0.40→0.45/0.55）；
+// 信心門檻「準星中央加權」：中央（瞄準區）0.60、邊緣 0.70（正確率優先，門檻拉到極高、只認非常確定的目標；歷程 0.18/0.30→0.25/0.35→0.30/0.40→0.45/0.55→0.60/0.70）；
 // NMS 0.6→重疊的多位玩家不互吃；MASK_TH 0.5→剪影貼身剛剛好（v35 前刻意放大，使用者要求改貼身）
-const SEG_CONF_CENTER = 0.45, SEG_CONF_EDGE = 0.55, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.5;
+const SEG_CONF_CENTER = 0.60, SEG_CONF_EDGE = 0.70, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.5;
 /** 依候選框中心離畫面中心的距離回傳門檻（letterbox 座標，S=輸入邊長） */
 function segConfTh(cx, cy, S) {
   const d = Math.hypot(cx - S / 2, cy - S / 2) / (S / 2);   // 0=正中 1=邊

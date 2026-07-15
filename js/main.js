@@ -133,8 +133,8 @@
   const DET_MIN_INTERVAL = new URLSearchParams(location.search).has('max') ? 0 : 55;   // 55ms≈18fps 上限（保底 ≥15）；?max=1 全速
   const DET_PERSIST_MS = 600;   // 單幀漏抓時沿用舊遮罩的時限（開火不因偵測斷幀落空）
   let fpsCount = 0, fpsLast = performance.now(), detErrors = 0;
-  // 保底 15fps：WebGPU 背景執行緒跑 256 時，若連續量測撐不到 15fps 就自動降到 192
-  let lowFpsSecs = 0, resDowngraded = false;
+  // 保底 15fps：WebGPU 背景執行緒解析度撐不住時階梯降級 256→192→128（fpsSwitching 防切換中重複觸發）
+  let fpsSwitching = false;
   async function detectLoop() {
     while (running) {
       const tStart = performance.now();
@@ -208,21 +208,16 @@
       if (now - fpsLast >= 1000) {
         const detFps = fpsCount;
         $('fpsText').textContent = `${detFps}/${renderFps}`;   // 偵測/畫面
-        // 保底 15fps：256 撐不住就自動降 192（偵測在背景執行緒，切換不影響準星/畫面）
-        if (!resDowngraded && detector?.worker && detector.size === 256) {
-          if (detFps < 15) {
-            if (++lowFpsSecs >= 2) {
-              resDowngraded = true;
-              console.log('[detect] 偵測 fps 連續 <15，256→192 保底降級');
-              detector.setResolution?.().catch(() => { resDowngraded = false; });
-            }
-          } else {
-            lowFpsSecs = 0;
-          }
+        // 保底 15fps：階梯自適應降級 256→192→128，每秒 fps<15 就降一階（偵測在背景執行緒，切換不卡準星/畫面）
+        if (detector?.worker && !fpsSwitching && detFps < 15 && detector.size > 128) {
+          const next = detector.size >= 256 ? SEG_192 : SEG_LORES;
+          fpsSwitching = true;
+          console.log(`[detect] fps ${detFps}<15，降級 ${detector.size}→${next.size}`);
+          detector.setResolution?.(next).finally(() => { fpsSwitching = false; });
         }
         fpsCount = 0; fpsLast = now;
       }
-      // 節流：偵測快時補足間隔到 ~83ms(12fps 上限)，把剩餘時間讓給畫面繪製；偵測慢時全速跑
+      // 節流：偵測快時補足間隔到 ~55ms(18fps 上限)，把剩餘時間讓給畫面繪製；偵測慢時全速跑
       const elapsed = performance.now() - tStart;
       const gap = Math.max(4, DET_MIN_INTERVAL - elapsed);
       await new Promise(r => setTimeout(r, gap));
@@ -239,6 +234,7 @@
 
     for (const pose of poses) drawTarget(pose, t, now);
     drawEffects(now);
+    if (firing) tryFire();      // 按住連發：綁定畫面幀，與冷卻環同幀 → 環與實際一致、連發跟畫面一樣順（不被偵測 setTimeout 飢餓）
     updateFireRing(now);
     updateSelfStatus(now);
     renderCount++;
@@ -806,18 +802,17 @@
     $('soloBtn').classList.add('primary');
   }
 
-  // 按住開火鍵 = 全自動連發（tryFire 內以射速冷卻節流）
-  let firing = false, fireTimer = null;
+  // 按住開火鍵 = 全自動連發：第一發即時，之後由 render() 每幀嘗試（tryFire 內以射速冷卻節流）。
+  // 連發交給畫面幀，不用獨立 setTimeout → 主線程忙（偵測）時也不會被飢餓，且與冷卻環同步。
+  let firing = false;
   function startFire() {
     if (firing) return;
     firing = true;
     $('fireBtn').classList.add('firing');
-    const loop = () => { if (!firing) return; tryFire(); fireTimer = setTimeout(loop, 20); };
-    loop();
+    tryFire();   // 第一發即時
   }
   function stopFire() {
     firing = false;
-    clearTimeout(fireTimer);
     $('fireBtn').classList.remove('firing');
   }
   const fb = $('fireBtn');

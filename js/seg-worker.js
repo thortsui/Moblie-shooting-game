@@ -14,8 +14,8 @@ importScripts('https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webg
 // 本站 /js/ 下而 404 → 明確指回 CDN
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/';
 
-// 信心門檻「準星中央加權」：中央 0.45、邊緣 0.55（正確率優先，門檻拉到上限、只認高把握目標最大化不誤判；歷程 0.18/0.30→0.25/0.35→0.30/0.40→0.45/0.55）；NMS 0.6 重疊玩家不互吃；MASK_TH 0.5 剪影貼身
-const SEG_CONF_CENTER = 0.45, SEG_CONF_EDGE = 0.55, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.5;
+// 信心門檻「準星中央加權」：中央 0.60、邊緣 0.70（正確率優先，門檻拉到極高、只認非常確定的目標；歷程 0.18/0.30→0.25/0.35→0.30/0.40→0.45/0.55→0.60/0.70）；NMS 0.6 重疊玩家不互吃；MASK_TH 0.5 剪影貼身
+const SEG_CONF_CENTER = 0.60, SEG_CONF_EDGE = 0.70, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.5;
 function segConfTh(cx, cy, S) {
   const d = Math.hypot(cx - S / 2, cy - S / 2) / (S / 2);
   const t = Math.min(1, Math.max(0, (d - 0.3) / 0.7));
