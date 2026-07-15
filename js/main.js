@@ -30,6 +30,13 @@
   let mirrored = false;
   let running = false;
 
+  /* ── 認人（re-ID）：嵌入模型 + 登錄向量 + 比對快取 ── */
+  let reid = null, myEmb = null;
+  const reidCache = new Map();   // trackId -> {t, pid}
+  const REID_TTL = 700, REID_MATCH_TH = 0.5, REID_BUDGET = 2;
+  createReidEmbedder?.().then(r => { reid = r; console.log('[reid] 就緒', r.backend); })
+    .catch(e => console.warn('[reid] 不可用，退回顏色識別', e));
+
   /* ── 座標轉換（object-fit: cover） ── */
   function coverTransform() {
     const vw = video.videoWidth, vh = video.videoHeight;
@@ -149,9 +156,35 @@
             }
           );
         } else {
-          // 顏色識別：這個人是哪個玩家
+          // 顏色識別：這個人是哪個玩家（基礎判定）
           for (const det of result) {
             det.pid = classifyPlayer(segColorSample(video, det), net.players, net.myPid);
+          }
+          // 認人（re-ID）覆蓋：嵌入向量比對，節流（每目標 ~700ms、每輪最多 2 個）
+          if (reid && net.players.some(p => p.emb && p.pid !== net.myPid)) {
+            let budget = REID_BUDGET;
+            const tR = performance.now();
+            for (const det of result) {
+              const c = reidCache.get(det.id);
+              if (c && tR - c.t < REID_TTL) { if (c.pid != null) det.pid = c.pid; continue; }
+              if (budget-- <= 0) continue;
+              try {
+                const b = det.bbox;
+                const e = await reid.embedRegion(video, b.minX, b.minY, b.maxX - b.minX, b.maxY - b.minY);
+                if (!e) continue;
+                let best = null, bs = REID_MATCH_TH;
+                for (const p of net.players) {
+                  if (!p.emb || p.pid === net.myPid) continue;
+                  const s = embCosine(e, p.emb);
+                  if (s > bs) { bs = s; best = p.pid; }
+                }
+                reidCache.set(det.id, { t: tR, pid: best });
+                if (best != null) det.pid = best;
+              } catch { /* 單次嵌入失敗不影響本幀 */ }
+            }
+            if (reidCache.size > 64) {
+              for (const [k, v] of reidCache) if (tR - v.t > 5000) reidCache.delete(k);
+            }
           }
         }
         // 遮罩延續：這一幀沒接上的目標（偵測偶發漏抓），沿用上一幀的遮罩一小段時間，
@@ -554,8 +587,8 @@
   /** 依所選武器換槍圖；圖檔還沒就位時 fallback 回預設 gun.png */
   function updateGunImage() {
     const img = $('gunImg');
-    img.onerror = () => { img.onerror = null; img.src = 'assets/gun.png?v=38'; };
-    img.src = `assets/guns/${myWeaponId}.png?v=38`;
+    img.onerror = () => { img.onerror = null; img.src = 'assets/gun.png?v=39'; };
+    img.src = `assets/guns/${myWeaponId}.png?v=39`;
   }
 
   /* ── 連線事件 ── */
@@ -693,6 +726,7 @@
       $('startGameBtn').classList.remove('hidden');
       $('startGameBtn').disabled = true;
       net.sendWeapon(myWeaponId);   // 把主選單選好的武器登記到玩家名單
+      if (myEmb) net.sendEmb?.(myEmb);
       enterLobby();
       renderPlayerList(net.players);
     });
@@ -710,6 +744,7 @@
       $('lobbyHint').textContent = '等待房主開始遊戲…';
       $('startGameBtn').classList.add('hidden');
       net.sendWeapon(myWeaponId);   // 把主選單選好的武器同步給房主
+      if (myEmb) net.sendEmb?.(myEmb);
       enterLobby();
     });
   });
@@ -727,6 +762,18 @@
     const warn = color.s < 0.2 ? '（顏色偏淡，建議穿更鮮豔的衣服）' : '';
     $('sampleStatus').textContent = `✔ 已登錄你的顏色 ${warn}`;
     $('sampleStatus').style.color = hsvToCss(color);
+    // 認人：同一時刻取直式（人形比例）區域算嵌入向量並廣播
+    if (reid) {
+      const w2 = r * 1.2, h2 = Math.min(vh, r * 2.4);
+      reid.embedRegion(src, vw / 2 - w2 / 2, Math.max(0, vh / 2 - h2 / 2), w2, h2)
+        .then(e => {
+          if (!e) return;
+          myEmb = Array.from(e);
+          net.sendEmb?.(myEmb);
+          $('sampleStatus').textContent += '＋特徵';
+        })
+        .catch(() => {});
+    }
   });
 
   $('startGameBtn').addEventListener('click', () => {

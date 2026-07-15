@@ -106,6 +106,13 @@ class HostNet extends NetBase {
         if (p && weaponById(d.weapon)) { p.weapon = d.weapon; this._broadcastPlayers(); }
         break;
       }
+      case 'emb': {   // 認人嵌入向量（128 維，登錄後全房廣播供比對）
+        const p = this.players.find(p => p.pid === conn._pid);
+        if (p && Array.isArray(d.emb) && d.emb.length === 128 && d.emb.every(Number.isFinite)) {
+          p.emb = d.emb; this._broadcastPlayers();
+        }
+        break;
+      }
       case 'hit':
         this.applyHit(conn._pid, d.victim, d.part, d.dmg);
         break;
@@ -163,6 +170,9 @@ class HostNet extends NetBase {
   sendHit(victim, part, dmg) { this.applyHit(0, victim, part, dmg); }
   sendColor(color) { this.setMyColor(color); }
   sendWeapon(weapon) { this.setMyWeapon(weapon); }
+  sendEmb(emb) {
+    if (Array.isArray(emb) && emb.length === 128) { this.players[0].emb = emb; this._broadcastPlayers(); }
+  }
 
   _isDead(pid, now) { return (this.state.deadUntil[pid] || 0) > now; }
 
@@ -180,7 +190,7 @@ class HostNet extends NetBase {
   }
 
   _broadcastPlayers() {
-    const pub = this.players.map(({ pid, name, color, weapon, offline }) => ({ pid, name, color, weapon, offline: !!offline }));
+    const pub = this.players.map(({ pid, name, color, weapon, emb, offline }) => ({ pid, name, color, weapon, emb: emb || null, offline: !!offline }));
     this._bcast({ t: 'players', players: pub });
     this.emit('players', pub);
   }
@@ -267,6 +277,7 @@ class ClientNet extends NetBase {
 
   sendColor(color) { if (this.conn?.open) this.conn.send({ t: 'color', color }); }
   sendWeapon(weapon) { if (this.conn?.open) this.conn.send({ t: 'weapon', weapon }); }
+  sendEmb(emb) { if (this.conn?.open) this.conn.send({ t: 'emb', emb }); }
   sendHit(victim, part, dmg) { if (this.conn?.open) this.conn.send({ t: 'hit', victim, part, dmg }); }
   destroy() { this._destroyed = true; clearTimeout(this._rejoinTimer); this.peer?.destroy(); }
 }
