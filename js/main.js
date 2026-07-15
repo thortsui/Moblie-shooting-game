@@ -128,7 +128,7 @@
   window.addEventListener('resize', resizeOverlay);
 
   /* ── 偵測迴圈（節流上限 ~18fps；偵測在背景執行緒，準星/畫面獨立跑滿幀）── */
-  const DET_MIN_INTERVAL = new URLSearchParams(location.search).has('max') ? 0 : 55;   // 55ms≈18fps 上限（保底 ≥15）；?max=1 全速
+  const DET_MIN_INTERVAL = new URLSearchParams(location.search).has('max') ? 0 : 90;   // 90ms≈11fps 上限：iPhone 上 256 推論與畫面合成搶同一顆 GPU，降偵測頻率釋放 GPU 給畫面（遮罩延續 600ms 補標記）；?max=1 全速
   const DET_PERSIST_MS = 600;   // 單幀漏抓時沿用舊遮罩的時限（開火不因偵測斷幀落空）
   let fpsCount = 0, fpsLast = performance.now(), detErrors = 0;
   // 保底 15fps：WebGPU 背景執行緒解析度撐不住時階梯降級 256→192→128（fpsSwitching 防切換中重複觸發）
@@ -205,12 +205,14 @@
       const now = performance.now();
       if (now - fpsLast >= 1000) {
         const detFps = fpsCount;
-        $('fpsText').textContent = `${detFps}/${renderFps}`;   // 偵測/畫面
-        // 保底 15fps：階梯自適應降級 256→192→128，每秒 fps<15 就降一階（偵測在背景執行緒，切換不卡準星/畫面）
-        if (detector?.worker && !fpsSwitching && detFps < 15 && detector.size > 128) {
+        $('fpsText').textContent = `${detFps}/${renderFps}·${detector?.size || ''}`;   // 偵測/畫面·解析度
+        // 階梯降級 256→192→128：以「畫面 fps」為準（GPU 被推論吃滿時畫面先掉，偵測 fps 未必低）；
+        // 畫面 <24fps 或偵測 <12fps 就降一階釋放 GPU（切換在背景執行緒，不卡準星/畫面）
+        if (detector?.worker && !fpsSwitching && detector.size > 128 &&
+            renderFps > 0 && (renderFps < 24 || detFps < 12)) {
           const next = detector.size >= 256 ? SEG_192 : SEG_LORES;
           fpsSwitching = true;
-          console.log(`[detect] fps ${detFps}<15，降級 ${detector.size}→${next.size}`);
+          console.log(`[detect] 畫面${renderFps}/偵測${detFps}，降級 ${detector.size}→${next.size}`);
           detector.setResolution?.(next).finally(() => { fpsSwitching = false; });
         }
         fpsCount = 0; fpsLast = now;

@@ -252,7 +252,14 @@ async function createSegDetectorWorker(onStatus) {
       const vw = video.videoWidth, vh = video.videoHeight;
       if (!vw) return [];
       let bitmap;
-      try { bitmap = await createImageBitmap(video); } catch { return []; }
+      try {
+        // 只送略大於模型輸入的縮圖（worker 仍 letterbox 到 SEG_SIZE），省主線程 createImageBitmap 與傳輸；
+        // 座標仍以原 vw/vh 映射（worker drawImage 會把縮圖放大到 letterbox 尺寸，不影響命中座標）
+        const s = Math.min(1, 384 / Math.max(vw, vh));
+        bitmap = s < 1
+          ? await createImageBitmap(video, { resizeWidth: Math.round(vw * s), resizeHeight: Math.round(vh * s), resizeQuality: 'low' })
+          : await createImageBitmap(video);
+      } catch { return []; }
       const id = ++reqId;
       const dets = await new Promise(res => {
         pending.set(id, res);
