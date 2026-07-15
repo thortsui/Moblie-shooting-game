@@ -68,16 +68,16 @@
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error('此瀏覽器不支援相機。若你是從 LINE / FB / IG 的訊息點開連結，請改用「以瀏覽器開啟」或複製網址到 Safari / Chrome');
     }
-    // 強化畫質：優先 2K 高解析度（清晰、利於顏色/特徵辨識），偵測會 letterbox 縮到模型輸入（WebGPU 256／WASM 128）；失敗逐層降級
-    const UHD = { width: { ideal: 2560 }, height: { ideal: 1440 }, frameRate: { ideal: 60 } };
-    const HI = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60 } };
+    // 流暢優先：相機用 720p/30fps 就夠（偵測會 letterbox 縮到模型輸入 256/128；顏色/特徵辨識 720p 也足夠）。
+    // 2K@60 會讓預覽渲染 + 每幀 createImageBitmap 非常吃資源 → 卡。失敗逐層降級。
+    const HI = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
+    const MID = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } };
     const candidates = [
-      { facingMode: { exact: 'environment' }, ...UHD },
+      { facingMode: { exact: 'environment' }, ...MID },
+      { facingMode: 'environment', ...MID },
       { facingMode: { exact: 'environment' }, ...HI },
-      { facingMode: 'environment', ...HI },
-      { ...UHD },
+      { ...MID },
       { ...HI },
-      { width: { ideal: 1280 }, height: { ideal: 720 } },
       true,
     ];
     let stream = null, lastErr = null;
@@ -324,19 +324,25 @@
     ctx.shadowBlur = 0;
   }
 
-  /** 畫人物剪影：遮罩畫進離屏 canvas，再平滑縮放貼到螢幕（避免一格格方塊過度覆蓋） */
-  const _maskCv = document.createElement('canvas');
-  const _maskCtx = _maskCv.getContext('2d');
+  /** 畫人物剪影：遮罩畫進「每個目標專屬」離屏 canvas 並快取，再平滑縮放貼到螢幕。
+      快取關鍵：poses 只在偵測更新（~15fps），render 跑 60fps → 同一 det 物件會被重畫多次；
+      只在遮罩內容/顏色變時才重建像素（省掉每幀 mw*mh 的 ImageData 迴圈），其餘幀只做 drawImage 縮放。 */
   function drawMask(det, t, rgba) {
     if (!det.mask) return;
     const tf = det._tf;
-    if (_maskCv.width !== det.mw) { _maskCv.width = det.mw; _maskCv.height = det.mh; }
-    const img = _maskCtx.createImageData(det.mw, det.mh);
-    const [r, g, b, a] = rgba;
-    for (let i = 0; i < det.mask.length; i++) {
-      if (det.mask[i]) { img.data[i*4] = r; img.data[i*4+1] = g; img.data[i*4+2] = b; img.data[i*4+3] = a; }
+    const key = rgba[0] + ',' + rgba[1] + ',' + rgba[2] + ',' + rgba[3];
+    if (!det._mcv || det._mcvKey !== key) {
+      const mcv = det._mcv || (det._mcv = document.createElement('canvas'));
+      if (mcv.width !== det.mw) { mcv.width = det.mw; mcv.height = det.mh; }
+      const mctx = det._mctx || (det._mctx = mcv.getContext('2d'));
+      const img = mctx.createImageData(det.mw, det.mh);
+      const [r, g, b, a] = rgba;
+      for (let i = 0; i < det.mask.length; i++) {
+        if (det.mask[i]) { img.data[i*4] = r; img.data[i*4+1] = g; img.data[i*4+2] = b; img.data[i*4+3] = a; }
+      }
+      mctx.putImageData(img, 0, 0);
+      det._mcvKey = key;
     }
-    _maskCtx.putImageData(img, 0, 0);
     // proto→螢幕 為線性映射；計算整個遮罩網格貼到螢幕的位置與尺寸
     const cellW = t.scale / (tf.mxScale * tf.scale);
     const cellH = t.scale / (tf.myScale * tf.scale);
@@ -345,7 +351,7 @@
     ctx.save();
     if (mirrored) { ctx.translate(overlay.width, 0); ctx.scale(-1, 1); }
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(_maskCv, 0, 0, det.mw, det.mh, originX, originY, cellW * det.mw, cellH * det.mh);
+    ctx.drawImage(det._mcv, 0, 0, det.mw, det.mh, originX, originY, cellW * det.mw, cellH * det.mh);
     ctx.restore();
   }
 
