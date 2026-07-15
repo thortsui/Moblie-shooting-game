@@ -134,7 +134,7 @@
   window.addEventListener('resize', resizeOverlay);
 
   /* ── 偵測迴圈（節流上限 ~18fps；偵測在背景執行緒，準星/畫面獨立跑滿幀）── */
-  const DET_MIN_INTERVAL = new URLSearchParams(location.search).has('max') ? 0 : 90;   // 90ms≈11fps 上限：iPhone 上 256 推論與畫面合成搶同一顆 GPU，降偵測頻率釋放 GPU 給畫面（遮罩延續 600ms 補標記）；?max=1 全速
+  const DET_MIN_INTERVAL = new URLSearchParams(location.search).has('max') ? 0 : 50;   // 50ms≈20fps 上限：192 較輕，撐得起高更新率讓剪影貼合移動的人；撐不住時自適應降 128；?max=1 全速
   const DET_PERSIST_MS = 600;   // 單幀漏抓時沿用舊遮罩的時限（開火不因偵測斷幀落空）
   let fpsCount = 0, fpsLast = performance.now(), detErrors = 0;
   // 保底 15fps：WebGPU 背景執行緒解析度撐不住時階梯降級 256→192→128（fpsSwitching 防切換中重複觸發）

@@ -23,8 +23,9 @@ const _qs = typeof location !== 'undefined' ? new URLSearchParams(location.searc
 const SEG_256 = { model: 'models/seg_r9_256.onnx', size: 256 };
 const SEG_192 = { model: 'models/seg_r9_192.onnx', size: 192 };
 const SEG_LORES = { model: 'models/seg_r9_128.onnx', size: 128 };
-// Worker（WebGPU 背景執行緒）預設 256；主線程 WebGPU 退回預設 192
-const SEG_WORKER_HIRES = _qs.has('fast') ? SEG_192 : SEG_256;
+// 預設 192（不分 worker/主線程）：iPhone WebGPU 上 256 推論太重 → 偵測更新率跟不上、剪影無法貼合移動的人。
+// 192 推論快、偵測 fps 高、剪影貼合，且 r9 官方評估本就在 192、正確率與 256 幾乎相同。?hq 才 256。
+const SEG_WORKER_HIRES = _qs.has('hq') ? SEG_256 : SEG_192;
 const SEG_MAIN_HIRES = _qs.has('hq') ? SEG_256 : SEG_192;
 // 256 撐不到 15fps 時的保底降級目標
 const SEG_FALLBACK = SEG_192;
