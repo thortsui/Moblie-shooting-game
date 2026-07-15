@@ -11,6 +11,9 @@
   const $ = id => document.getElementById(id);
   const video = $('video'), overlay = $('overlay');
   const ctx = overlay.getContext('2d');
+  // render 用的像素密度上限：手機 devicePixelRatio 常是 3，overlay 內部像素會被放到超大
+  // （面積是 dpr=2 的 2.25×），每幀 clearRect+貼圖負擔重。clamp 到 2 大幅減負，且與相機畫質無關。
+  const RDPR = Math.min(window.devicePixelRatio || 1, 2);
 
   let mode = 'solo';           // 'solo' | 'host' | 'client'
   let net = null;              // HostNet / ClientNet
@@ -68,16 +71,11 @@
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error('此瀏覽器不支援相機。若你是從 LINE / FB / IG 的訊息點開連結，請改用「以瀏覽器開啟」或複製網址到 Safari / Chrome');
     }
-    // 流暢優先：相機用 720p/30fps 就夠（偵測會 letterbox 縮到模型輸入 256/128；顏色/特徵辨識 720p 也足夠）。
-    // 2K@60 會讓預覽渲染 + 每幀 createImageBitmap 非常吃資源 → 卡。失敗逐層降級。
-    const HI = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
-    const MID = { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } };
+    // 用裝置預設相機解析度（不強制 width/height，畫質交給裝置；相機顯示由瀏覽器合成，非卡頓主因）。
+    // 只指定後鏡頭；失敗逐層降級到任意相機。
     const candidates = [
-      { facingMode: { exact: 'environment' }, ...MID },
-      { facingMode: 'environment', ...MID },
-      { facingMode: { exact: 'environment' }, ...HI },
-      { ...MID },
-      { ...HI },
+      { facingMode: { exact: 'environment' } },
+      { facingMode: 'environment' },
       true,
     ];
     let stream = null, lastErr = null;
@@ -122,8 +120,8 @@
   }
 
   function resizeOverlay() {
-    overlay.width = window.innerWidth * devicePixelRatio;
-    overlay.height = window.innerHeight * devicePixelRatio;
+    overlay.width = window.innerWidth * RDPR;
+    overlay.height = window.innerHeight * RDPR;
     overlay.style.width = window.innerWidth + 'px';
     overlay.style.height = window.innerHeight + 'px';
   }
@@ -283,14 +281,14 @@
     drawMask(pose, t, fill);
 
     const topMid = toScreen((bounds.minX + bounds.maxX) / 2, bounds.minY, t);
-    const barW = Math.max(70 * devicePixelRatio, (bounds.maxX - bounds.minX) * t.scale * 0.6);
-    const barH = 10 * devicePixelRatio;
+    const barW = Math.max(70 * RDPR, (bounds.maxX - bounds.minX) * t.scale * 0.6);
+    const barH = 10 * RDPR;
     const bx = topMid.x - barW / 2;
-    const by = topMid.y - barH - 14 * devicePixelRatio;
+    const by = topMid.y - barH - 14 * RDPR;
 
     if (!info.registered) {
       // 未登錄的人：只標示問號，不能打
-      ctx.font = `${14 * devicePixelRatio}px system-ui`;
+      ctx.font = `${14 * RDPR}px system-ui`;
       ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(255,255,255,.55)';
       ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
       ctx.fillText('未登錄', topMid.x, by + barH);
@@ -300,7 +298,7 @@
 
     if (dead) {
       const secs = Math.ceil(info.deadRemainMs / 1000);
-      ctx.font = `${16 * devicePixelRatio}px system-ui`;
+      ctx.font = `${16 * RDPR}px system-ui`;
       ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
       ctx.shadowColor = '#000'; ctx.shadowBlur = 6;
       ctx.fillText(`💀 重生 ${secs}s`, topMid.x, by + barH);
@@ -315,12 +313,12 @@
     ctx.fillStyle = ratio > 0.5 ? '#2ecc71' : ratio > 0.25 ? '#f39c12' : '#e74c3c';
     if (ratio > 0) { roundRect(bx, by, barW * ratio, barH, barH / 2); ctx.fill(); }
     ctx.strokeStyle = 'rgba(255,255,255,.7)';
-    ctx.lineWidth = 1.5 * devicePixelRatio;
+    ctx.lineWidth = 1.5 * RDPR;
     roundRect(bx, by, barW, barH, barH / 2); ctx.stroke();
-    ctx.font = `${11 * devicePixelRatio}px system-ui`;
+    ctx.font = `${11 * RDPR}px system-ui`;
     ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
     ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
-    ctx.fillText(`${info.label} · ${info.hp}`, topMid.x, by - 4 * devicePixelRatio);
+    ctx.fillText(`${info.label} · ${info.hp}`, topMid.x, by - 4 * RDPR);
     ctx.shadowBlur = 0;
   }
 
@@ -371,7 +369,7 @@
   function drawEffects(now) {
     const cx = overlay.width / 2, cy = overlay.height / 2;
     const sx = cx, sy = overlay.height * 0.66;   // 由槍口射出
-    const dpr = devicePixelRatio;
+    const dpr = RDPR;
     for (let i = effects.length - 1; i >= 0; i--) {
       const fx = effects[i];
       const p = (now - fx.t0) / fx.dur;
