@@ -71,11 +71,17 @@
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error('此瀏覽器不支援相機。若你是從 LINE / FB / IG 的訊息點開連結，請改用「以瀏覽器開啟」或複製網址到 Safari / Chrome');
     }
-    // 用裝置預設相機解析度（不強制 width/height，畫質交給裝置；相機顯示由瀏覽器合成，非卡頓主因）。
-    // 只指定後鏡頭；失敗逐層降級到任意相機。
+    // 原生高畫質：不指定解析度時 getUserMedia 會給低畫質預設（常 640×480/720p）→ 畫面被壓縮。
+    // 故明確要求到 4K（ideal，裝置會給它支援的最高原生畫質），顯示清晰。
+    // 偵測已與相機解析度解耦（只送 384 縮圖、推論固定 256），高畫質相機不加重偵測/GPU 負擔。失敗逐層降級。
+    const UHD = { width: { ideal: 3840 }, height: { ideal: 2160 }, frameRate: { ideal: 30 } };
+    const HI = { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } };
     const candidates = [
-      { facingMode: { exact: 'environment' } },
-      { facingMode: 'environment' },
+      { facingMode: { exact: 'environment' }, ...UHD },
+      { facingMode: { exact: 'environment' }, ...HI },
+      { facingMode: 'environment', ...UHD },
+      { ...UHD },
+      { ...HI },
       true,
     ];
     let stream = null, lastErr = null;
