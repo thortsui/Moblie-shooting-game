@@ -197,7 +197,7 @@ function segWorkerSupported() {
 
 async function createSegDetectorWorker(onStatus) {
   onStatus('啟動背景執行緒…');
-  const worker = new Worker('js/seg-worker.js?v=43');
+  const worker = new Worker('js/seg-worker.js?v=44');
   const abs = m => new URL(m, location.href).href;
   const assignIds = _makeTracker();
   // 方法 C：GPU 後處理，?noc 可關閉做 A/B 對照
