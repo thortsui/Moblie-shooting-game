@@ -138,8 +138,11 @@
   const DET_MIN_INTERVAL = new URLSearchParams(location.search).has('max') ? 0 : 50;   // 50ms≈20fps 上限：192 較輕，撐得起高更新率讓剪影貼合移動的人；撐不住時自適應降 128；?max=1 全速
   const DET_PERSIST_MS = 600;   // 單幀漏抓時沿用舊遮罩的時限（開火不因偵測斷幀落空）
   let fpsCount = 0, fpsLast = performance.now(), detErrors = 0;
-  // 保底 15fps：WebGPU 背景執行緒解析度撐不住時階梯降級 256→192→128（fpsSwitching 防切換中重複觸發）
+  // 保底 15fps：WebGPU 背景執行緒解析度撐不住時階梯降級 256→192→128（fpsSwitching 防切換中重複觸發）；
+  // 反向自動升階：跑得動（偵測≥16fps 且畫面≥30fps）連續 3 秒 → 升一階 128→192→256，讓快手機吃更高畫質
   let fpsSwitching = false;
+  let upStreak = 0;    // 連續達標秒數（升階需連續 3 秒，避免瞬間好轉就升）
+  let upBanned = 0;    // 曾經降級的解析度不再自動升回去（防升↔降振盪）
   async function detectLoop() {
     while (running) {
       const tStart = performance.now();
@@ -233,9 +236,26 @@
         if (detector?.worker && !fpsSwitching && detector.size > 128 &&
             renderFps > 0 && (renderFps < 24 || detFps < 12)) {
           const next = detector.size >= 256 ? SEG_192 : SEG_LORES;
+          upBanned = detector.size;   // 這一階撐不住 → 之後不再自動升回來
+          upStreak = 0;
           fpsSwitching = true;
           console.log(`[detect] 畫面${renderFps}/偵測${detFps}，降級 ${detector.size}→${next.size}`);
           detector.setResolution?.(next).finally(() => { fpsSwitching = false; });
+        } else if (detector?.worker && detector.backend === 'webgpu' && !fpsSwitching &&
+                   detector.size < 256 && detFps >= 16 && renderFps >= 30) {
+          // 自動升階 128→192→256：只在 WebGPU（WASM 升階運算量翻倍會直接卡死）；
+          // 偵測≥16 且畫面≥30 連續 3 秒才升，且不升回曾降級的解析度
+          const up = detector.size <= 128 ? SEG_192 : SEG_256;
+          if (upBanned && up.size >= upBanned) {
+            upStreak = 0;
+          } else if (++upStreak >= 3) {
+            upStreak = 0;
+            fpsSwitching = true;
+            console.log(`[detect] 畫面${renderFps}/偵測${detFps}，升階 ${detector.size}→${up.size}`);
+            detector.setResolution?.(up).finally(() => { fpsSwitching = false; });
+          }
+        } else {
+          upStreak = 0;
         }
         fpsCount = 0; fpsLast = now;
       }
