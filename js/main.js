@@ -138,8 +138,8 @@
   const DET_MIN_INTERVAL = new URLSearchParams(location.search).has('max') ? 0 : 50;   // 50ms≈20fps 上限：192 較輕，撐得起高更新率讓剪影貼合移動的人；撐不住時自適應降 128；?max=1 全速
   const DET_PERSIST_MS = 600;   // 單幀漏抓時沿用舊遮罩的時限（開火不因偵測斷幀落空）
   let fpsCount = 0, fpsLast = performance.now(), detErrors = 0;
-  // 保底 15fps：WebGPU 背景執行緒解析度撐不住時階梯降級 256→192→128（fpsSwitching 防切換中重複觸發）；
-  // 反向自動升階：跑得動（偵測≥18fps 且畫面≥40fps）連續 3 秒 → 升一階 128→192→256，讓快手機吃更高畫質
+  // 自適應解析度階梯 128↔192↔256↔320↔384（SEG_LADDER，fpsSwitching 防切換中重複觸發）：
+  // 撐不住降一階保流暢；跑得動（偵測≥18fps 且畫面≥40fps）連續 3 秒升一階吃更高正確率
   let fpsSwitching = false;
   let upStreak = 0;    // 連續達標秒數（升階需連續 3 秒，避免瞬間好轉就升）
   let upBanned = 0;    // 曾經降級的解析度不再自動升回去（防升↔降振盪）
@@ -231,22 +231,26 @@
       if (now - fpsLast >= 1000) {
         const detFps = fpsCount;
         $('fpsText').textContent = `${detFps}/${renderFps}·${detector?.size || ''}`;   // 偵測/畫面·解析度
-        // 階梯降級 256→192→128：以「畫面 fps」為準（GPU 被推論吃滿時畫面先掉，偵測 fps 未必低）；
-        // 畫面 <24fps 或偵測 <12fps 就降一階釋放 GPU（切換在背景執行緒，不卡準星/畫面）
-        if (detector?.worker && !fpsSwitching && detector.size > 128 &&
-            renderFps > 0 && (renderFps < 24 || detFps < 12)) {
-          const next = detector.size >= 256 ? SEG_192 : SEG_LORES;
+        // 自適應解析度：沿 SEG_LADDER（128↔192↔256↔320↔384）升降。
+        // 降級以「畫面 fps」為準（GPU 被推論吃滿時畫面先掉，偵測 fps 未必低）：
+        //   畫面 <24 或偵測 <12 就降一階；>256 的重階多一條「偵測 <15 就降」——高解析正確率再高，
+        //   偵測更新率掉太多剪影就跟不上移動的人，寧可退一階。
+        // 升階：偵測≥18 且畫面≥40 連續 3 秒（18≈50ms 節流上限的實測值），不升回曾降級的階。
+        const ladderIdx = SEG_LADDER.findIndex(c => c.size === detector?.size);
+        if (detector?.worker && !fpsSwitching && ladderIdx > 0 &&
+            renderFps > 0 &&
+            (renderFps < 24 || detFps < 12 || (detector.size > 256 && detFps < 15))) {
+          const next = SEG_LADDER[ladderIdx - 1];
           upBanned = detector.size;   // 這一階撐不住 → 之後不再自動升回來
           upStreak = 0;
           fpsSwitching = true;
           console.log(`[detect] 畫面${renderFps}/偵測${detFps}，降級 ${detector.size}→${next.size}`);
           detector.setResolution?.(next).finally(() => { fpsSwitching = false; });
         } else if (detector?.worker && detector.backend === 'webgpu' && !fpsSwitching &&
-                   detector.size < 256 && detFps >= 18 && renderFps >= 40) {
-          // 自動升階 128→192→256：只在 WebGPU（WASM 升階運算量翻倍會直接卡死）；
-          // 偵測≥18 且畫面≥40 連續 3 秒才升，且不升回曾降級的解析度
-          // （偵測被 DET_MIN_INTERVAL=50ms 節流封頂在 ~20fps，實測跑順時約 18–19 → 18 = 接近跑滿）
-          const up = detector.size <= 128 ? SEG_192 : SEG_256;
+                   ladderIdx >= 0 && ladderIdx < SEG_LADDER.length - 1 &&
+                   detFps >= 18 && renderFps >= 40) {
+          // 只在 WebGPU 升階（WASM 升階運算量翻倍會直接卡死）
+          const up = SEG_LADDER[ladderIdx + 1];
           if (upBanned && up.size >= upBanned) {
             upStreak = 0;
           } else if (++upStreak >= 3) {

@@ -20,9 +20,14 @@
 //   WASM（舊機）＝128：被運算量卡住，只能靠降解析度保流暢。
 //   ?hq 強制 256、?fast 強制 192（效能對照用）。
 const _qs = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
+const SEG_384 = { model: 'models/seg_r9_384.onnx', size: 384 };
+const SEG_320 = { model: 'models/seg_r9_320.onnx', size: 320 };
 const SEG_256 = { model: 'models/seg_r9_256.onnx', size: 256 };
 const SEG_192 = { model: 'models/seg_r9_192.onnx', size: 192 };
 const SEG_LORES = { model: 'models/seg_r9_128.onnx', size: 128 };
+// 升降階梯（自適應解析度）。實測官方 GT mAP50：192=0.503、256=0.576、320=0.616、384=0.645
+// → 推論解析度越高正確率越高（小目標/多人收益最大），跑得動的手機自動往上爬。
+const SEG_LADDER = [SEG_LORES, SEG_192, SEG_256, SEG_320, SEG_384];
 // 預設 192（不分 worker/主線程）：iPhone WebGPU 上 256 推論太重 → 偵測更新率跟不上、剪影無法貼合移動的人。
 // 192 推論快、偵測 fps 高、剪影貼合，且 r9 官方評估本就在 192、正確率與 256 幾乎相同。?hq 才 256。
 const SEG_WORKER_HIRES = _qs.has('hq') ? SEG_256 : SEG_192;
@@ -197,7 +202,7 @@ function segWorkerSupported() {
 
 async function createSegDetectorWorker(onStatus) {
   onStatus('啟動背景執行緒…');
-  const worker = new Worker('js/seg-worker.js?v=44');
+  const worker = new Worker('js/seg-worker.js?v=45');
   const abs = m => new URL(m, location.href).href;
   const assignIds = _makeTracker();
   // 方法 C：GPU 後處理，?noc 可關閉做 A/B 對照
