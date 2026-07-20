@@ -20,11 +20,15 @@
 //   WASM（舊機）＝128：被運算量卡住，只能靠降解析度保流暢。
 //   ?hq 強制 256、?fast 強制 192（效能對照用）。
 const _qs = typeof location !== 'undefined' ? new URLSearchParams(location.search) : new URLSearchParams();
-const SEG_384 = { model: 'models/seg_r9_384.onnx', size: 384 };
-const SEG_320 = { model: 'models/seg_r9_320.onnx', size: 320 };
-const SEG_256 = { model: 'models/seg_r9_256.onnx', size: 256 };
-const SEG_192 = { model: 'models/seg_r9_192.onnx', size: 192 };
-const SEG_LORES = { model: 'models/seg_r9_128.onnx', size: 128 };
+// dynamic ONNX：單一模型檔吃任意 /32 尺寸。letterbox 改「長邊=size、短邊貼相機比例向上取 /32」，
+// 灰邊從直拍 44% 降到 <6%（實測準度微升 0.9157→0.9194、速度 1.19×+，見工作日誌 2026-07-20）。
+// size 意義不變（=長邊），升降階梯照舊，但換檔不再需要重載模型（同一檔案，只改輸入尺寸）。
+const SEG_DYN_MODEL = 'models/seg_r9_dyn.onnx';
+const SEG_384 = { model: SEG_DYN_MODEL, size: 384 };
+const SEG_320 = { model: SEG_DYN_MODEL, size: 320 };
+const SEG_256 = { model: SEG_DYN_MODEL, size: 256 };
+const SEG_192 = { model: SEG_DYN_MODEL, size: 192 };
+const SEG_LORES = { model: SEG_DYN_MODEL, size: 128 };
 // 升降階梯（自適應解析度）。實測官方 GT mAP50：192=0.503、256=0.576、320=0.616、384=0.645
 // → 推論解析度越高正確率越高（小目標/多人收益最大），跑得動的手機自動往上爬。
 const SEG_LADDER = [SEG_LORES, SEG_192, SEG_256, SEG_320, SEG_384];
@@ -39,9 +43,9 @@ const SEG_HIRES = SEG_WORKER_HIRES;
 // 信心門檻「準星中央加權」：中央（瞄準區）0.60、邊緣 0.70（正確率優先，門檻拉到極高、只認非常確定的目標；歷程 0.18/0.30→0.25/0.35→0.30/0.40→0.45/0.55→0.60/0.70）；
 // NMS 0.6→重疊的多位玩家不互吃；MASK_TH 0.5→剪影貼身剛剛好（v35 前刻意放大，使用者要求改貼身）
 const SEG_CONF_CENTER = 0.60, SEG_CONF_EDGE = 0.70, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.5;
-/** 依候選框中心離畫面中心的距離回傳門檻（letterbox 座標，S=輸入邊長） */
-function segConfTh(cx, cy, S) {
-  const d = Math.hypot(cx - S / 2, cy - S / 2) / (S / 2);   // 0=正中 1=邊
+/** 依候選框中心離畫面中心的距離回傳門檻（letterbox 座標，W/H=輸入寬高；正方形時與舊版一致） */
+function segConfTh(cx, cy, W, H) {
+  const d = Math.hypot(cx - W / 2, cy - H / 2) / (Math.min(W, H) / 2);   // 0=正中 1=短邊緣
   const t = Math.min(1, Math.max(0, (d - 0.3) / 0.7));      // 中央 30% 全放寬
   return SEG_CONF_CENTER + (SEG_CONF_EDGE - SEG_CONF_CENTER) * t;
 }
@@ -64,7 +68,7 @@ async function createSegDetector(onStatus) {
   onStatus(`輪廓模型就緒（${SEG_SIZE}）`);
 
   const inName = sess.inputNames[0], outN = sess.outputNames;
-  const pre = document.createElement('canvas'); pre.width = pre.height = SEG_SIZE;
+  const pre = document.createElement('canvas'); pre.width = pre.height = SEG_SIZE;   // 實際尺寸每幀依相機比例調整
   const preCtx = pre.getContext('2d', { willReadFrequently: true });
 
   // 輕量追蹤器：以 bbox 中心距離配對前後影格，給穩定 ID
@@ -94,19 +98,22 @@ async function createSegDetector(onStatus) {
       const vw = video.videoWidth, vh = video.videoHeight;
       if (!vw) return [];
       const _t0 = performance.now();
-      // letterbox 到 192
-      const scale = Math.min(SEG_SIZE / vw, SEG_SIZE / vh);
-      const nw = vw * scale, nh = vh * scale, padX = (SEG_SIZE - nw) / 2, padY = (SEG_SIZE - nh) / 2;
-      preCtx.fillStyle = '#000'; preCtx.fillRect(0, 0, SEG_SIZE, SEG_SIZE);
+      // 無灰邊 letterbox：長邊縮到 SEG_SIZE，短邊貼相機比例、向上取 /32（殘餘灰邊 ≤31px）
+      const scale = SEG_SIZE / Math.max(vw, vh);
+      const nw = vw * scale, nh = vh * scale;
+      const W = Math.ceil(nw / 32) * 32, H = Math.ceil(nh / 32) * 32;
+      const padX = (W - nw) / 2, padY = (H - nh) / 2;
+      if (pre.width !== W || pre.height !== H) { pre.width = W; pre.height = H; }
+      preCtx.fillStyle = '#000'; preCtx.fillRect(0, 0, W, H);
       preCtx.drawImage(video, padX, padY, nw, nh);
-      const d = preCtx.getImageData(0, 0, SEG_SIZE, SEG_SIZE).data;
-      const t = new Float32Array(3 * SEG_SIZE * SEG_SIZE);
-      const area = SEG_SIZE * SEG_SIZE;
+      const d = preCtx.getImageData(0, 0, W, H).data;
+      const area = W * H;
+      const t = new Float32Array(3 * area);
       for (let i = 0; i < area; i++) {
         t[i] = d[i * 4] / 255; t[area + i] = d[i * 4 + 1] / 255; t[2 * area + i] = d[i * 4 + 2] / 255;
       }
       const _t1 = performance.now();
-      const res = await sess.run({ [inName]: new ort.Tensor('float32', t, [1, 3, SEG_SIZE, SEG_SIZE]) });
+      const res = await sess.run({ [inName]: new ort.Tensor('float32', t, [1, 3, H, W]) });
       const _t2 = performance.now();
       const o0 = res[outN[0]], o1 = res[outN[1]];
       const [, ch, N] = o0.dims;               // ch=37
@@ -119,7 +126,7 @@ async function createSegDetector(onStatus) {
         const score = A[4 * N + i];
         if (score < SEG_CONF_CENTER) continue;
         const cx = A[i], cy = A[N + i], w = A[2 * N + i], h = A[3 * N + i];
-        if (score < segConfTh(cx, cy, SEG_SIZE)) continue;
+        if (score < segConfTh(cx, cy, W, H)) continue;
         const coeffs = new Float32Array(32);
         for (let k = 0; k < 32; k++) coeffs[k] = A[(5 + k) * N + i];
         dets.push({ score, ix1: cx - w / 2, iy1: cy - h / 2, ix2: cx + w / 2, iy2: cy + h / 2, coeffs });
@@ -141,7 +148,7 @@ async function createSegDetector(onStatus) {
 
       const inputToVideoX = ix => (ix - padX) / scale;
       const inputToVideoY = iy => (iy - padY) / scale;
-      const mxScale = mw / SEG_SIZE, myScale = mh / SEG_SIZE;
+      const mxScale = mw / W, myScale = mh / H;
 
       const out = keep.map(dd => {
         // 二值遮罩（proto 解析度），限制在 bbox 內
@@ -202,7 +209,7 @@ function segWorkerSupported() {
 
 async function createSegDetectorWorker(onStatus) {
   onStatus('啟動背景執行緒…');
-  const worker = new Worker('js/seg-worker.js?v=45');
+  const worker = new Worker('js/seg-worker.js?v=46');
   const abs = m => new URL(m, location.href).href;
   const assignIds = _makeTracker();
   // 方法 C：GPU 後處理，?noc 可關閉做 A/B 對照

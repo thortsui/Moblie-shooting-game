@@ -16,8 +16,8 @@ ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/di
 
 // 信心門檻「準星中央加權」：中央 0.60、邊緣 0.70（正確率優先，門檻拉到極高、只認非常確定的目標；歷程 0.18/0.30→0.25/0.35→0.30/0.40→0.45/0.55→0.60/0.70）；NMS 0.6 重疊玩家不互吃；MASK_TH 0.5 剪影貼身
 const SEG_CONF_CENTER = 0.60, SEG_CONF_EDGE = 0.70, SEG_NMS_IOU = 0.6, SEG_MASK_TH = 0.5;
-function segConfTh(cx, cy, S) {
-  const d = Math.hypot(cx - S / 2, cy - S / 2) / (S / 2);
+function segConfTh(cx, cy, W, H) {
+  const d = Math.hypot(cx - W / 2, cy - H / 2) / (Math.min(W, H) / 2);
   const t = Math.min(1, Math.max(0, (d - 0.3) / 0.7));
   return SEG_CONF_CENTER + (SEG_CONF_EDGE - SEG_CONF_CENTER) * t;
 }
@@ -26,8 +26,8 @@ const SEG_MASK_LOGIT = Math.log(SEG_MASK_TH / (1 - SEG_MASK_TH));
 const MAXD = 8; // GPU 遮罩批次上限（單畫面人數不會超過）
 function sigmoid(x) { return 1 / (1 + Math.exp(-x)); }
 
-let sess = null, backend = 'webgpu', SEG_SIZE = 256, inName = '';
-let cvs = null, cctx = null;
+let sess = null, backend = 'webgpu', SEG_SIZE = 256, inName = '', MODEL_URL = '';
+let cvs = null, cctx = null;   // 前處理畫布：尺寸每幀依相機比例算（無灰邊 letterbox），變動時重建
 let gpuPost = false;      // C 是否啟用（session 以 gpu-buffer 輸出建立成功）
 let gpu = null;           // { device, pipeline, params, coeffs, boxes, out, staging, capacity }
 
@@ -48,18 +48,16 @@ onmessage = async (e) => {
         sess = await ort.InferenceSession.create(msg.hires.model, { executionProviders: ['webgpu'] });
         gpuPost = false;
       }
-      backend = 'webgpu'; SEG_SIZE = msg.hires.size;
+      backend = 'webgpu'; SEG_SIZE = msg.hires.size; MODEL_URL = msg.hires.model;
       if (gpuPost) {
         try { initGpuPost(); } catch (err) { gpuPost = false; }
       }
     } catch (err) {
-      backend = 'wasm'; SEG_SIZE = msg.lores.size; gpuPost = false;
+      backend = 'wasm'; SEG_SIZE = msg.lores.size; gpuPost = false; MODEL_URL = msg.lores.model;
       ort.env.wasm.numThreads = msg.threads || 4;
       sess = await ort.InferenceSession.create(msg.lores.model, { executionProviders: ['wasm'] });
     }
     inName = sess.inputNames[0];
-    cvs = new OffscreenCanvas(SEG_SIZE, SEG_SIZE);
-    cctx = cvs.getContext('2d', { willReadFrequently: true });
     postMessage({ type: 'ready', backend, size: SEG_SIZE, gpuPost });
     } catch (err) {
       // 兩種後端都失敗：明確回報，讓主線程退回主線程偵測器（不再無聲卡死）
@@ -68,7 +66,13 @@ onmessage = async (e) => {
     return;
   }
   if (msg.type === 'setModel') {
-    // 執行中切換偵測解析度（256↔192 保底降級）；重建 session + 前處理畫布
+    // 執行中切換偵測解析度。dynamic 模型：同一檔案任意尺寸 → 只改 SEG_SIZE，零重載
+    if (msg.model === MODEL_URL) {
+      SEG_SIZE = msg.size;
+      postMessage({ type: 'model-ready', size: SEG_SIZE });
+      return;
+    }
+    // 換成不同模型檔才重建 session
     try {
       const wantC = gpuPost && backend === 'webgpu';
       let ns;
@@ -81,9 +85,7 @@ onmessage = async (e) => {
         ns = await ort.InferenceSession.create(msg.model, { executionProviders: [backend] });
       }
       const prev = sess;
-      sess = ns; SEG_SIZE = msg.size; inName = sess.inputNames[0];
-      cvs = new OffscreenCanvas(SEG_SIZE, SEG_SIZE);
-      cctx = cvs.getContext('2d', { willReadFrequently: true });
+      sess = ns; SEG_SIZE = msg.size; inName = sess.inputNames[0]; MODEL_URL = msg.model;
       prev?.release?.();
       postMessage({ type: 'model-ready', size: SEG_SIZE });
     } catch (err) {
@@ -191,17 +193,37 @@ async function gpuMasks(protoBuffer, keep, mh, mw) {
 
 async function runDetect(bitmap, vw, vh) {
   const t0 = performance.now();
-  const scale = Math.min(SEG_SIZE / vw, SEG_SIZE / vh);
-  const nw = vw * scale, nh = vh * scale, padX = (SEG_SIZE - nw) / 2, padY = (SEG_SIZE - nh) / 2;
-  cctx.fillStyle = '#000'; cctx.fillRect(0, 0, SEG_SIZE, SEG_SIZE);
+  // 無灰邊 letterbox：長邊縮到 SEG_SIZE，短邊貼相機比例、向上取 /32（殘餘灰邊 ≤31px）
+  const scale = SEG_SIZE / Math.max(vw, vh);
+  const nw = vw * scale, nh = vh * scale;
+  const W = Math.ceil(nw / 32) * 32, H = Math.ceil(nh / 32) * 32;
+  const padX = (W - nw) / 2, padY = (H - nh) / 2;
+  if (!cvs || cvs.width !== W || cvs.height !== H) {
+    cvs = new OffscreenCanvas(W, H);
+    cctx = cvs.getContext('2d', { willReadFrequently: true });
+  }
+  cctx.fillStyle = '#000'; cctx.fillRect(0, 0, W, H);
   cctx.drawImage(bitmap, padX, padY, nw, nh);
-  const d = cctx.getImageData(0, 0, SEG_SIZE, SEG_SIZE).data;
-  const area = SEG_SIZE * SEG_SIZE;
+  const d = cctx.getImageData(0, 0, W, H).data;
+  const area = W * H;
   const t = new Float32Array(3 * area);
   for (let i = 0; i < area; i++) { t[i] = d[i*4]/255; t[area+i] = d[i*4+1]/255; t[2*area+i] = d[i*4+2]/255; }
   const t1 = performance.now();
 
-  const res = await sess.run({ [inName]: new ort.Tensor('float32', t, [1, 3, SEG_SIZE, SEG_SIZE]) });
+  const feed = { [inName]: new ort.Tensor('float32', t, [1, 3, H, W]) };
+  let res;
+  try {
+    res = await sess.run(feed);
+  } catch (err) {
+    // gpu-buffer + dynamic 尺寸在部分裝置可能執行期才失敗：退回一般 session 重試一次
+    if (!gpuPost) throw err;
+    gpuPost = false;
+    const prev = sess;
+    sess = await ort.InferenceSession.create(MODEL_URL, { executionProviders: [backend] });
+    inName = sess.inputNames[0];
+    prev?.release?.();
+    res = await sess.run({ [inName]: new ort.Tensor('float32', t, [1, 3, H, W]) });
+  }
   const t2 = performance.now();
   const on = sess.outputNames;
   const o0 = res[on[0]], o1 = res[on[1]];
@@ -217,7 +239,7 @@ async function runDetect(bitmap, vw, vh) {
     const score = A[4 * N + i];
     if (score < SEG_CONF_CENTER) continue;
     const cx = A[i], cy = A[N+i], w = A[2*N+i], h = A[3*N+i];
-    if (score < segConfTh(cx, cy, SEG_SIZE)) continue;
+    if (score < segConfTh(cx, cy, W, H)) continue;
     const coeffs = new Float32Array(32);
     for (let k = 0; k < 32; k++) coeffs[k] = A[(5+k)*N + i];
     cand.push({ score, ix1: cx-w/2, iy1: cy-h/2, ix2: cx+w/2, iy2: cy+h/2, coeffs });
@@ -236,7 +258,7 @@ async function runDetect(bitmap, vw, vh) {
   }
 
   const i2vX = ix => (ix - padX) / scale, i2vY = iy => (iy - padY) / scale;
-  const mxScale = mw / SEG_SIZE, myScale = mh / SEG_SIZE;
+  const mxScale = mw / W, myScale = mh / H;
   for (const dd of keep) {
     dd.bx1 = dd.ix1*mxScale; dd.bx2 = dd.ix2*mxScale; dd.by1 = dd.iy1*myScale; dd.by2 = dd.iy2*myScale;
   }

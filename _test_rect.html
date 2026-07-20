@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head><meta charset="UTF-8"><title>rect letterbox 測試</title>
+<style>body{background:#111;color:#eee;font-family:monospace} canvas{border:1px solid #555;max-width:45%} #out{white-space:pre-wrap;font-size:12px}</style>
+</head>
+<body>
+<h3>無灰邊 letterbox 測試(直式 480×854 + 橫式 854×480)</h3>
+<div id="canvases"></div>
+<div id="out">載入中…</div>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webgpu.min.js"></script>
+<script src="js/detector-seg.js?v=46"></script>
+<script>
+const log = [];
+function say(s){ log.push(s); document.getElementById('out').textContent = log.join('\n'); }
+
+function makeVideo(w, h, img) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  function draw(){
+    ctx.fillStyle = '#334'; ctx.fillRect(0,0,w,h);
+    // 圖片等比放大鋪滿(cover)
+    const s = Math.max(w/img.width, h/img.height);
+    ctx.drawImage(img, (w-img.width*s)/2, (h-img.height*s)/2, img.width*s, img.height*s);
+    requestAnimationFrame(draw);
+  }
+  draw();
+  const v = document.createElement('video');
+  v.srcObject = c.captureStream(15); v.muted = true; v.play();
+  return v;
+}
+
+function overlay(video, dets, label) {
+  const c = document.createElement('canvas');
+  c.width = video.videoWidth; c.height = video.videoHeight;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(video, 0, 0);
+  ctx.strokeStyle = '#0f0'; ctx.lineWidth = 3; ctx.fillStyle = 'rgba(0,255,0,0.35)';
+  for (const d of dets) {
+    ctx.strokeRect(d.bbox.minX, d.bbox.minY, d.bbox.maxX-d.bbox.minX, d.bbox.maxY-d.bbox.minY);
+    const tf = d._tf;
+    for (let my=0; my<d.mh; my++) for (let mx=0; mx<d.mw; mx++) {
+      if (!d.mask[my*d.mw+mx]) continue;
+      const vx = (mx/tf.mxScale - tf.padX)/tf.scale, vy = (my/tf.myScale - tf.padY)/tf.scale;
+      ctx.fillRect(vx, vy, 1/tf.mxScale/tf.scale, 1/tf.myScale/tf.scale);
+    }
+  }
+  ctx.fillStyle='#ff0'; ctx.font='20px monospace'; ctx.fillText(label, 8, 24);
+  document.getElementById('canvases').appendChild(c);
+}
+
+async function testOne(det, w, h, img, label) {
+  const v = makeVideo(w, h, img);
+  await new Promise(r => v.onloadedmetadata = () => setTimeout(r, 300));
+  let dets = [];
+  for (let i=0;i<10;i++) dets = await det.detect(v);   // 跑幾輪暖機+穩定
+  const p = window.__segProf || {};
+  say(`[${label}] ${w}x${h} → 偵測 ${dets.length} 人  prof=${JSON.stringify(p)}`);
+  for (const d of dets) {
+    const b = d.bbox, area = d.mask.reduce((a,x)=>a+x,0);
+    say(`  bbox=(${b.minX|0},${b.minY|0})-(${b.maxX|0},${b.maxY|0}) score=${d.score.toFixed(2)} mask=${d.mh}x${d.mw} 遮罩px=${area}`);
+    // 命中測試:bbox 中心應在剪影內
+    const hit = segHitTest(d, (b.minX+b.maxX)/2, (b.minY+b.maxY)/2);
+    say(`  中心命中=${hit}`);
+  }
+  overlay(v, dets, label);
+  return dets;
+}
+
+(async () => {
+  try {
+    const img = new Image(); img.src = '_test_person.jpg';
+    await img.decode();
+    say(`測試圖 ${img.width}x${img.height}`);
+    const useWorker = segWorkerSupported();
+    say(`worker 支援=${useWorker}`);
+    const det = useWorker
+      ? await createSegDetectorWorker(s => say('狀態: '+s)).catch(e => { say('worker 失敗退主線程: '+e.message); return createSegDetector(s => say('狀態: '+s)); })
+      : await createSegDetector(s => say('狀態: '+s));
+    say(`backend=${det.backend} worker=${!!det.worker}`);
+    const d1 = await testOne(det, 480, 854, img, '直式9:16');
+    const d2 = await testOne(det, 854, 480, img, '橫式16:9');
+    // 換檔測試(dynamic 模型應零重載)
+    if (det.setResolution) {
+      const r = await det.setResolution({ model: 'models/seg_r9_dyn.onnx', size: 256 });
+      say(`setResolution(256) → ${JSON.stringify(r)}`);
+      const d3 = await testOne(det, 480, 854, img, '直式@256');
+    }
+    say(`RESULT: ${d1.length>0 && d2.length>0 ? 'PASS' : 'FAIL'}`);
+  } catch (e) {
+    say('ERROR: ' + (e.stack || e));
+  }
+})();
+</script>
+</body>
+</html>
