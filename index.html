@@ -11,7 +11,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/style.css?v=45">
+<link rel="stylesheet" href="css/style.css?v=47">
 </head>
 <body>
 
@@ -26,6 +26,12 @@
   <div id="weaponBox">
     <p class="weapon-title">🔫 選擇武器</p>
     <div id="weaponList"></div>
+  </div>
+
+  <!-- AI 模型世代（自由切換各代；不選=預設 r9 綜合最強；選擇會記憶） -->
+  <div id="genBox">
+    <label for="genSelect">🧠 AI 模型世代</label>
+    <select id="genSelect"></select>
   </div>
 
   <div class="menu-btns">
@@ -117,12 +123,12 @@
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webgpu.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
 
-<script src="js/detector-seg.js?v=46"></script>
+<script src="js/detector-seg.js?v=47"></script>
 <script src="js/game.js?v=45"></script>
 <script src="js/colorid.js?v=45"></script>
 <script src="js/net.js?v=45"></script>
 <script src="js/reid.js?v=45"></script>
-<script src="js/main.js?v=45"></script>
+<script src="js/main.js?v=47"></script>
 <script>
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>

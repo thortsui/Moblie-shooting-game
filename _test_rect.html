@@ -8,7 +8,12 @@
 <div id="canvases"></div>
 <div id="out">載入中…</div>
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.webgpu.min.js"></script>
-<script src="js/detector-seg.js?v=46"></script>
+<script>
+// ?gen=r12s 可測任一世代(寫入 localStorage,detector-seg.js 載入時讀取)
+const _g = new URLSearchParams(location.search).get('gen');
+if (_g) localStorage.setItem('segGen', _g); else localStorage.removeItem('segGen');
+</script>
+<script src="js/detector-seg.js?v=47"></script>
 <script>
 const log = [];
 function say(s){ log.push(s); document.getElementById('out').textContent = log.join('\n'); }

@@ -658,6 +658,33 @@
     net?.sendWeapon?.(id);   // 已在房間裡就同步給其他玩家（僅顯示用）
   }
 
+  /* ── AI 模型世代選單（主選單；dynamic ONNX 熱切換，主線程偵測器則重載頁面） ── */
+  function initGenSelect() {
+    const sel = $('genSelect');
+    if (!sel || typeof SEG_GENS === 'undefined') return;
+    for (const g of SEG_GENS) {
+      const o = document.createElement('option');
+      o.value = g.id; o.textContent = g.label;
+      sel.appendChild(o);
+    }
+    sel.value = segGenId();
+    sel.addEventListener('change', async () => {
+      try { localStorage.setItem('segGen', sel.value); } catch {}
+      alertStatus(`切換 AI 模型 ${sel.value}…`);
+      try {
+        const det = detector || (detectorPromise ? await detectorPromise : null);
+        if (det?.setResolution) {
+          const r = await det.setResolution({ model: segGenModel(sel.value), size: det.size || 192 });
+          alertStatus(r?.error ? `切換失敗：${r.error}` : `AI 模型已切換：${sel.value}`);
+        } else if (det) {
+          location.reload();   // 主線程偵測器不支援熱切換：記憶選擇後重載
+        } else {
+          alertStatus(`已選 ${sel.value}（進遊戲時載入）`);
+        }
+      } catch (e) { alertStatus(`切換失敗：${e.message}`); }
+    });
+  }
+
   /** 依所選武器換槍圖；圖檔還沒就位時 fallback 回預設 gun.png */
   function updateGunImage() {
     const img = $('gunImg');
@@ -855,6 +882,7 @@
   });
 
   renderWeaponList();   // 主選單武器列（預設手槍）
+  initGenSelect();      // AI 模型世代選單（預設 r9，選擇記憶於 localStorage）
 
   // ?solo=1 → 單機測試專用頁（只留單機按鈕，跟正式對戰頁分開）
   if (new URLSearchParams(location.search).has('solo')) {

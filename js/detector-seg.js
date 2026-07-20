@@ -23,12 +23,38 @@ const _qs = typeof location !== 'undefined' ? new URLSearchParams(location.searc
 // dynamic ONNX：單一模型檔吃任意 /32 尺寸。letterbox 改「長邊=size、短邊貼相機比例向上取 /32」，
 // 灰邊從直拍 44% 降到 <6%（實測準度微升 0.9157→0.9194、速度 1.19×+，見工作日誌 2026-07-20）。
 // size 意義不變（=長邊），升降階梯照舊，但換檔不再需要重載模型（同一檔案，只改輸入尺寸）。
-const SEG_DYN_MODEL = 'models/seg_r9_dyn.onnx';
-const SEG_384 = { model: SEG_DYN_MODEL, size: 384 };
-const SEG_320 = { model: SEG_DYN_MODEL, size: 320 };
-const SEG_256 = { model: SEG_DYN_MODEL, size: 256 };
-const SEG_192 = { model: SEG_DYN_MODEL, size: 192 };
-const SEG_LORES = { model: SEG_DYN_MODEL, size: 128 };
+// ── 模型世代選單（index.html #genSelect；localStorage 記憶；預設 r9=綜合最強）──
+// 標籤依 2026-07-20 全模型大會考（192/256/320 × valgt/parts 雙基準）
+const SEG_GENS = [
+  { id: 'r9',     label: 'r9 — 預設・綜合最強' },
+  { id: 'r12s',   label: 'r12s — 192檔最準（大模型・慢3×）' },
+  { id: 'r9_640', label: 'r9_640 — 高解析特化（320↑最強）' },
+  { id: 'r11',    label: 'r11 — 前代 320/384 部署版' },
+  { id: 'r13n',   label: 'r13n — 蒸餾實驗版' },
+  { id: 'r12n',   label: 'r12n — 劣化增強版' },
+  { id: 'r14n',   label: 'r14n — 全手段疊加版' },
+  { id: 'r10',    label: 'r10 — r9 微調版' },
+  { id: 'r8',     label: 'r8 — 第 8 代' },
+  { id: 'r7',     label: 'r7 — 第 7 代' },
+  { id: 'r6',     label: 'r6 — 第 6 代' },
+  { id: 'r5',     label: 'r5 — 第 5 代' },
+  { id: 'r4',     label: 'r4 — 第 4 代' },
+  { id: 'r3',     label: 'r3 — 第 3 代' },
+  { id: 'r2',     label: 'r2 — 第 2 代' },
+  { id: 'r1',     label: 'r1 — 初代' },
+];
+function segGenId() {
+  try { const g = localStorage.getItem('segGen'); if (g && SEG_GENS.some(x => x.id === g)) return g; } catch {}
+  return 'r9';
+}
+function segGenModel(id) { return `models/seg_${id || segGenId()}_dyn.onnx`; }
+// 階梯 cfg 的 model 用 getter：切換世代後，升降檔自動跟著用新世代（不會切回預設）
+function _genCfg(size) { return { get model() { return segGenModel(); }, size }; }
+const SEG_384 = _genCfg(384);
+const SEG_320 = _genCfg(320);
+const SEG_256 = _genCfg(256);
+const SEG_192 = _genCfg(192);
+const SEG_LORES = _genCfg(128);
 // 升降階梯（自適應解析度）。實測官方 GT mAP50：192=0.503、256=0.576、320=0.616、384=0.645
 // → 推論解析度越高正確率越高（小目標/多人收益最大），跑得動的手機自動往上爬。
 const SEG_LADDER = [SEG_LORES, SEG_192, SEG_256, SEG_320, SEG_384];
