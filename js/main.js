@@ -141,8 +141,9 @@
   // 自適應解析度階梯 128↔192↔256↔320↔384（SEG_LADDER，fpsSwitching 防切換中重複觸發）：
   // 撐不住降一階保流暢；跑得動（偵測≥18fps 且畫面≥40fps）連續 3 秒升一階吃更高正確率
   let fpsSwitching = false;
-  let upStreak = 0;    // 連續達標秒數（升階需連續 3 秒，避免瞬間好轉就升）
-  let upBanned = 0;    // 曾經降級的解析度不再自動升回去（防升↔降振盪）
+  let upStreak = 0;      // 連續達標秒數（升階需連續 3 秒；s 系列檔 5 秒）
+  let upBannedIdx = -1;  // 曾經降級的「階梯序號」不再自動升回去（混合階梯下以序號記才正確）
+  let ladderIdx = -1;    // 目前所在階梯序號（auto 階梯同尺寸可對應不同模型，須自行追蹤）
   async function detectLoop() {
     while (running) {
       const tStart = performance.now();
@@ -231,33 +232,43 @@
       if (now - fpsLast >= 1000) {
         const detFps = fpsCount;
         $('fpsText').textContent = `${detFps}/${renderFps}·${detector?.size || ''}`;   // 偵測/畫面·解析度
-        // 自適應解析度：沿 SEG_LADDER（128↔192↔256↔320↔384）升降。
-        // 降級以「畫面 fps」為準（GPU 被推論吃滿時畫面先掉，偵測 fps 未必低）：
-        //   畫面 <24 或偵測 <12 就降一階；>256 的重階多一條「偵測 <15 就降」——高解析正確率再高，
-        //   偵測更新率掉太多剪影就跟不上移動的人，寧可退一階。
-        // 升階：偵測≥18 且畫面≥40 連續 3 秒（18≈50ms 節流上限的實測值），不升回曾降級的階。
-        const ladderIdx = SEG_LADDER.findIndex(c => c.size === detector?.size);
+        // 自適應升降:沿 segLadder() 走——auto 模式=「畫質優先」混合配對表
+        // (nano 先爬解析度 128→384,各檔位配該檔位最強 nano;效能過剩才進 r9s 檔),
+        // 指定世代=該代 128~384。降級以「畫面 fps」為準(GPU 被推論吃滿時畫面先掉):
+        //   畫面 <24 或偵測 <12 降一階;>256 重階多一條「偵測 <15 就降」。
+        // 升階:偵測≥18 且畫面≥40 連續 3 秒;**s 系列檔門檻加倍嚴:偵測≥25 且畫面≥50 連續 5 秒**
+        // (使用者:只用 nano,除非玩家效能真的扛得住 s)。不升回曾降級的階(以階梯序號記)。
+        const LAD = segLadder();
+        if (ladderIdx < 0 || LAD[ladderIdx]?.size !== detector?.size) {
+          ladderIdx = LAD.findIndex(c => c.size === detector?.size);
+        }
         if (detector?.worker && !fpsSwitching && ladderIdx > 0 &&
             renderFps > 0 &&
             (renderFps < 24 || detFps < 12 || (detector.size > 256 && detFps < 15))) {
-          const next = SEG_LADDER[ladderIdx - 1];
-          upBanned = detector.size;   // 這一階撐不住 → 之後不再自動升回來
+          const next = LAD[ladderIdx - 1], target = ladderIdx - 1;
+          upBannedIdx = ladderIdx;   // 這一階撐不住 → 之後不再自動升回來
           upStreak = 0;
           fpsSwitching = true;
           console.log(`[detect] 畫面${renderFps}/偵測${detFps}，降級 ${detector.size}→${next.size}`);
-          detector.setResolution?.(next).finally(() => { fpsSwitching = false; });
+          detector.setResolution?.(next)
+            .then(r => { if (!r?.error) ladderIdx = target; })
+            .finally(() => { fpsSwitching = false; });
         } else if (detector?.worker && detector.backend === 'webgpu' && !fpsSwitching &&
-                   ladderIdx >= 0 && ladderIdx < SEG_LADDER.length - 1 &&
-                   detFps >= 18 && renderFps >= 40) {
+                   ladderIdx >= 0 && ladderIdx < LAD.length - 1) {
           // 只在 WebGPU 升階（WASM 升階運算量翻倍會直接卡死）
-          const up = SEG_LADDER[ladderIdx + 1];
-          if (upBanned && up.size >= upBanned) {
+          const up = LAD[ladderIdx + 1], target = ladderIdx + 1;
+          const needDet = up.strong ? 25 : 18, needRender = up.strong ? 50 : 40, needStreak = up.strong ? 5 : 3;
+          if (detFps < needDet || renderFps < needRender) {
             upStreak = 0;
-          } else if (++upStreak >= 3) {
+          } else if (upBannedIdx >= 0 && target >= upBannedIdx) {
+            upStreak = 0;
+          } else if (++upStreak >= needStreak) {
             upStreak = 0;
             fpsSwitching = true;
-            console.log(`[detect] 畫面${renderFps}/偵測${detFps}，升階 ${detector.size}→${up.size}`);
-            detector.setResolution?.(up).finally(() => { fpsSwitching = false; });
+            console.log(`[detect] 畫面${renderFps}/偵測${detFps}，升階 ${detector.size}→${up.size}${up.strong ? '（r9s 檔）' : ''}`);
+            detector.setResolution?.(up)
+              .then(r => { if (!r?.error) ladderIdx = target; })
+              .finally(() => { fpsSwitching = false; });
           }
         } else {
           upStreak = 0;
@@ -670,6 +681,7 @@
     sel.value = segGenId();
     sel.addEventListener('change', async () => {
       try { localStorage.setItem('segGen', sel.value); } catch {}
+      ladderIdx = -1; upBannedIdx = -1; upStreak = 0;   // 換世代=換階梯,重置升降狀態
       alertStatus(`切換 AI 模型 ${sel.value}…`);
       try {
         const det = detector || (detectorPromise ? await detectorPromise : null);

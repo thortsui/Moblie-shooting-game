@@ -26,9 +26,13 @@ const _qs = typeof location !== 'undefined' ? new URLSearchParams(location.searc
 // ── 模型世代選單（index.html #genSelect；localStorage 記憶；預設 r9=綜合最強）──
 // 標籤依 2026-07-20 全模型大會考（192/256/320 × valgt/parts 雙基準）
 const SEG_GENS = [
-  { id: 'r9',     label: 'r9 — 預設・綜合最強' },
-  { id: 'r12s',   label: 'r12s — 192檔最準（大模型・慢3×）' },
-  { id: 'r9_640', label: 'r9_640 — 高解析特化（320↑最強）' },
+  { id: 'auto',   label: '自動 — 畫質優先・效能夠再上 r9s（預設）' },
+  { id: 'r9',     label: 'r9 — nano 綜合最強' },
+  { id: 'r9s',    label: 'r9s — 三卷大滿貫（s・慢3×）' },
+  { id: 'r9_1024',label: 'r9_1024 — 1024特化（乾淨史高0.74@1024）' },
+  { id: 'r16n',   label: 'r16n — r9s蒸餾版（≈r9）' },
+  { id: 'r12s',   label: 'r12s — 舊s王（已被r9s取代）' },
+  { id: 'r9_640', label: 'r9_640 — 高解析特化（320↑）' },
   { id: 'r11',    label: 'r11 — 前代 320/384 部署版' },
   { id: 'r13n',   label: 'r13n — 蒸餾實驗版' },
   { id: 'r12n',   label: 'r12n — 劣化增強版' },
@@ -45,9 +49,12 @@ const SEG_GENS = [
 ];
 function segGenId() {
   try { const g = localStorage.getItem('segGen'); if (g && SEG_GENS.some(x => x.id === g)) return g; } catch {}
-  return 'r9';
+  return 'auto';
 }
-function segGenModel(id) { return `models/seg_${id || segGenId()}_dyn.onnx`; }
+function segGenModel(id) {
+  const g = id || segGenId();
+  return `models/seg_${g === 'auto' ? 'r9' : g}_dyn.onnx`;   // auto 模式基底=r9(nano 綜合最強)
+}
 // 階梯 cfg 的 model 用 getter：切換世代後，升降檔自動跟著用新世代（不會切回預設）
 function _genCfg(size) { return { get model() { return segGenModel(); }, size }; }
 const SEG_384 = _genCfg(384);
@@ -55,6 +62,20 @@ const SEG_320 = _genCfg(320);
 const SEG_256 = _genCfg(256);
 const SEG_192 = _genCfg(192);
 const SEG_LORES = _genCfg(128);
+// 自動階梯(gen=auto,預設):畫質優先往上爬,各檔位配三卷會考該檔位最強的 nano
+// (≤256 r9;320/384 r9_640 貼臉卷勝出);效能真的過剩(strong 門檻:偵測≥25/畫面≥50/連續5秒)
+// 才進 r9s 檔——s 系列 3.5× 算力,唯玩家機器扛得住才上。成本序:0.4x→1→1.8→2.8→4→6.6→10.3(GFLOPs 相對值)
+const SEG_AUTO_LADDER = [
+  { model: 'models/seg_r9_dyn.onnx',     size: 128 },
+  { model: 'models/seg_r9_dyn.onnx',     size: 192 },
+  { model: 'models/seg_r9_dyn.onnx',     size: 256 },
+  { model: 'models/seg_r9_640_dyn.onnx', size: 320 },
+  { model: 'models/seg_r9_640_dyn.onnx', size: 384 },
+  { model: 'models/seg_r9s_dyn.onnx',    size: 256, strong: true },
+  { model: 'models/seg_r9s_dyn.onnx',    size: 320, strong: true },
+];
+/** 目前生效的升降階梯:auto=混合配對表;指定世代=該代 128~384 */
+function segLadder() { return segGenId() === 'auto' ? SEG_AUTO_LADDER : SEG_LADDER; }
 // 升降階梯（自適應解析度）。實測官方 GT mAP50：192=0.503、256=0.576、320=0.616、384=0.645
 // → 推論解析度越高正確率越高（小目標/多人收益最大），跑得動的手機自動往上爬。
 const SEG_LADDER = [SEG_LORES, SEG_192, SEG_256, SEG_320, SEG_384];
